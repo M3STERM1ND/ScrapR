@@ -1,0 +1,85 @@
+- generic [active] [ref=e1]:
+  - link "Skip to content" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - banner [ref=e3]:
+    - navigation "Main" [ref=e4]:
+      - link "ScrapR home" [ref=e5] [cursor=pointer]:
+        - /url: "#top"
+        - generic [ref=e6]: ScrapR
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - link "How it works" [ref=e13] [cursor=pointer]:
+            - /url: "#how-it-works"
+        - listitem [ref=e14]:
+          - link "Evidence" [ref=e15] [cursor=pointer]:
+            - /url: "#evidence"
+        - listitem [ref=e16]:
+          - link "Workspace" [ref=e17] [cursor=pointer]:
+            - /url: "#workspace"
+        - listitem [ref=e18]:
+          - link "FAQ" [ref=e19] [cursor=pointer]:
+            - /url: "#faq"
+      - generic [ref=e20]:
+        - link "Sign in" [ref=e21] [cursor=pointer]:
+          - /url: "#start"
+        - link "Start researching" [ref=e22] [cursor=pointer]:
+          - /url: "#start"
+  - main [ref=e23]:
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - paragraph [ref=e28]: Autonomous research agent
+          - heading "Ask one question. Get research you can check." [level=1] [ref=e30]:
+            - generic [ref=e31]: Ask one question.
+            - generic [ref=e33]: Get research you can check.
+        - generic [ref=e35]:
+          - paragraph [ref=e36]: ScrapR reads the filings, the news, and the rest of the open web, then hands back a full report. Charts where they help, a source behind every claim, and a straight answer when the evidence runs out.
+          - generic [ref=e37]:
+            - link "Start researching" [ref=e38] [cursor=pointer]:
+              - /url: "#start"
+            - link "See a sample report" [ref=e41] [cursor=pointer]:
+              - /url: "#preview"
+          - paragraph [ref=e42]: No account needed for your first report.
+      - generic [ref=e45]:
+        - generic [ref=e46]:
+          - generic [ref=e47]:
+            - paragraph [ref=e48]: Research objective
+            - paragraph [ref=e49]: Analyze NVIDIA as a company, an investment, and a place to work.
+          - generic [ref=e50]: 42 sources reviewed
+        - generic [ref=e53]:
+          - generic [ref=e54]:
+            - paragraph [ref=e55]: Working
+            - list [ref=e56]:
+              - listitem [ref=e57]:
+                - generic [ref=e60]: Read the latest filings
+              - listitem [ref=e61]:
+                - generic [ref=e64]: Pull five years of revenue
+              - listitem [ref=e65]:
+                - generic [ref=e68]: Compare against four rivals
+              - listitem [ref=e69]:
+                - generic [ref=e72]: Reconcile two conflicting figures
+              - listitem [ref=e73]:
+                - generic [ref=e76]: Write the report
+          - generic [ref=e77]:
+            - paragraph [ref=e78]: Evidence collected
+            - list [ref=e79]:
+              - listitem [ref=e80]:
+                - generic [ref=e81]:
+                  - generic [ref=e82]: SEC 10-Q filing
+                  - generic [ref=e83]: Primary
+                - generic [ref=e84]: "96"
+              - listitem [ref=e88]:
+                - generic [ref=e89]:
+                  - generic [ref=e90]: NVIDIA investor relations
+                  - generic [ref=e91]: Primary
+                - generic [ref=e92]: "92"
+              - listitem [ref=e96]:
+                - generic [ref=e97]:
+                  - generic [ref=e98]: Reuters
+                  - generic [ref=e99]: Established press
+                - generic [ref=e100]: "81"
+              - listitem [ref=e104]:
+                - generic [ref=e105]:
+                  - generic [ref=e106]: Bureau of Labor Statistics
+                  - generic [ref=e107]: Official data
+                - generic [ref=e108]: "88"

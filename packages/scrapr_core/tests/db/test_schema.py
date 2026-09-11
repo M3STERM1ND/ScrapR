@@ -31,6 +31,7 @@ VERSION_SCOPED_TABLES = frozenset(
         "visualizations",
         "exports",
         "research_runs",
+        "research_questions",
     }
 )
 
@@ -42,7 +43,13 @@ def table(name: str) -> Table:
 
 
 def test_every_table_in_the_plan_exists() -> None:
-    """The baseline is the whole design, not a first slice of it."""
+    """The schema is the whole design, not a first slice of it.
+
+    `research_questions` and `question_evidence` are the two tables added since
+    the baseline. They are `DEC-04`'s only schema consequence: termination is
+    defined as coverage of the planned question set, so the questions cannot
+    live in memory.
+    """
     assert ALL_TABLES == {
         "users",
         "anonymous_sessions",
@@ -63,7 +70,9 @@ def test_every_table_in_the_plan_exists() -> None:
         "upload_chunks",
         "exports",
         "activity_events",
+        "research_questions",
         "research_runs",
+        "question_evidence",
         "run_steps",
         "tool_invocations",
     }

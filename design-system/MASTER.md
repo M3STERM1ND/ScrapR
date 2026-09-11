@@ -21,6 +21,7 @@ Dominant: Hurricane Grey (warm grey family). Accent: Ochre. Nothing else.
 | line-strong | #C9C2BA | emphasized rules | — |
 | ochre | #C2761B | graphics, fills, large type only | 3.4:1 (never small text) |
 | ochre-deep | #8A4F0B | accent text on light | 6.5:1 (AA) |
+| ochre-light | #D3903A | accent text on night | 6.6:1 on night (AA) |
 | ochre-wash | #F7ECDD | accent tint surface | — |
 | night | #1A1815 | inverted sections | — |
 

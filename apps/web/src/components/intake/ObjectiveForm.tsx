@@ -93,7 +93,7 @@ export function ObjectiveForm() {
         <div className="flex items-center justify-between border-t border-line px-5 py-3">
           <p id="objective-help" className="text-micro text-ink-muted">
             {tooShort
-              ? `A few more words — ${OBJECTIVE_MIN - trimmed.length} to go.`
+              ? `A few more words. ${OBJECTIVE_MIN - trimmed.length} to go.`
               : "The more specific the question, the better the report."}
           </p>
           <p className="tnum text-micro text-ink-muted">

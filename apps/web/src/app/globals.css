@@ -12,6 +12,10 @@
   --color-line-strong: #c9c2ba;
   --color-ochre: #c2761b;
   --color-ochre-deep: #8a4f0b;
+  /* The dark-ground counterpart of ochre-deep. Ochre itself is 4.35:1 on night,
+     which fails AA for small text, and the palette had no lighter step — so an
+     inverted section could not carry an accent word legibly. 6.6:1 here. */
+  --color-ochre-light: #d3903a;
   --color-ochre-wash: #f7ecdd;
   --color-night: #1a1815;
   --color-night-soft: #241f1a;

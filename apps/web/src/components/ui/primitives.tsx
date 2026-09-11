@@ -10,7 +10,7 @@ export function Eyebrow({
   return (
     <p
       className={`flex items-center gap-3 text-micro font-medium ${
-        tone === "dark" ? "text-ochre" : "text-ochre-deep"
+        tone === "dark" ? "text-ochre-light" : "text-ochre-deep"
       }`}
     >
       <span
@@ -28,6 +28,7 @@ export function SectionIntro({
   body,
   tone = "light",
   align = "left",
+  size = "l",
   className = "",
 }: {
   eyebrow: string;
@@ -35,6 +36,9 @@ export function SectionIntro({
   body?: ReactNode;
   tone?: "light" | "dark";
   align?: "left" | "center";
+  /** `m` for a heading that sits in a narrow column, where the full display
+   * size breaks into four cramped lines instead of reading as a statement. */
+  size?: "l" | "m";
   className?: string;
 }) {
   return (
@@ -43,7 +47,9 @@ export function SectionIntro({
     >
       <Eyebrow tone={tone}>{eyebrow}</Eyebrow>
       <h2
-        className={`display-l mt-6 max-w-[20ch] ${tone === "dark" ? "text-surface" : "text-ink"}`}
+        className={`${size === "l" ? "display-l" : "display-m"} mt-6 max-w-[20ch] ${
+          tone === "dark" ? "text-surface" : "text-ink"
+        }`}
       >
         {title}
       </h2>

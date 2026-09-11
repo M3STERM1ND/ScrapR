@@ -41,6 +41,21 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
+    web_origins: str = Field(
+        default="http://localhost:3000",
+        alias="WEB_ORIGINS",
+        description=(
+            "Comma-separated origins allowed to call the API with credentials. "
+            "Explicit origins only: the session cookie means a wildcard would "
+            "let any site on the internet read a user's research."
+        ),
+    )
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        """`web_origins` split and cleaned."""
+        return [origin.strip() for origin in self.web_origins.split(",") if origin.strip()]
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

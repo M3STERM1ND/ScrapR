@@ -36,6 +36,7 @@ Thumbs.db
 .playwright-mcp/
 playwright-report/
 test-results/
+.lighthouseci/
 graphify-out/
 
 # --- Local Postgres volume from docker compose ---

@@ -361,3 +361,33 @@ def test_health_does_not_touch_the_database(client: TestClient) -> None:
     """A health check that fails when Postgres blips takes the API down with
     it, which is the opposite of what it is for."""
     assert client.get("/health").json() == {"status": "ok"}
+
+
+# --------------------------------------------------------------------------
+# Cross-origin access
+# --------------------------------------------------------------------------
+
+
+def test_the_configured_web_origin_may_send_credentials(client: TestClient) -> None:
+    """The frontend runs on a different origin in development, and the session
+    cookie is the whole authorization story — so it has to be allowed to travel."""
+    response = client.post(
+        "/v1/research",
+        json={"objective": OBJECTIVE},
+        headers={"Origin": "http://localhost:3000"},
+    )
+
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_an_unlisted_origin_is_not_allowed(client: TestClient) -> None:
+    """A wildcard here would let any site on the internet read a visitor's
+    research, since the browser would happily attach their cookie."""
+    response = client.post(
+        "/v1/research",
+        json={"objective": OBJECTIVE},
+        headers={"Origin": "https://evil.example"},
+    )
+
+    assert "access-control-allow-origin" not in response.headers

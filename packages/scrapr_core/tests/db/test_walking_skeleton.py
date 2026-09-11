@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from scrapr_core.db.enums import (
     ActivityStatus,
     ClaimType,
+    ResearchStatus,
     RunStatus,
     StepStatus,
     VersionStatus,
@@ -34,6 +35,7 @@ from scrapr_core.db.models import (
     Evidence,
     ReportSection,
     ResearchRun,
+    ResearchSession,
     Source,
 )
 from scrapr_core.db.repositories import (
@@ -404,3 +406,69 @@ def _uuid(value: str) -> UUID:
 
 def _runs_for(session_id: str) -> Select[tuple[ResearchRun]]:
     return select(ResearchRun).where(ResearchRun.session_id == _uuid(session_id))
+
+
+# --------------------------------------------------------------------------
+# What the person who asked sees
+# --------------------------------------------------------------------------
+
+
+async def test_the_session_status_follows_the_run(
+    session_factory: sessionmaker[Session],
+    registry: ToolRegistry,
+    provider: FakeLLMProvider,
+) -> None:
+    """`REQ-WORK-002`: the workspace header reads the *session* status.
+
+    Leaving it at `pending` while steps execute tells the user their research is
+    queued while they are watching it run, and leaving it there afterwards tells
+    them it never happened.
+    """
+    _, session_id = start_research(session_factory)
+
+    with session_factory() as session:
+        research = session.get(ResearchSession, _uuid(session_id))
+        assert research is not None
+        assert research.status is ResearchStatus.PENDING
+
+    await make_runner(session_factory, registry, provider).run_until_idle()
+
+    with session_factory() as session:
+        research = session.get(ResearchSession, _uuid(session_id))
+        assert research is not None
+        assert research.status is ResearchStatus.COMPLETE
+
+
+async def test_a_failed_run_leaves_the_session_saying_so(
+    session_factory: sessionmaker[Session], provider: FakeLLMProvider
+) -> None:
+    """`REQ-AGENT-009 AC-3`: research that could not be done must not read as
+    complete, and must not read as still running either."""
+    registry = ToolRegistry()
+    registry.register(
+        FailingFixtureTool(name="broken", category=ToolCategory.WEB_SEARCH)
+    )
+    _, session_id = start_research(session_factory)
+
+    await make_runner(session_factory, registry, provider).run_until_idle()
+
+    with session_factory() as session:
+        research = session.get(ResearchSession, _uuid(session_id))
+        assert research is not None
+        assert research.status is ResearchStatus.FAILED
+
+
+async def test_a_run_in_flight_reads_as_running(
+    session_factory: sessionmaker[Session],
+    registry: ToolRegistry,
+    provider: FakeLLMProvider,
+) -> None:
+    """After the first stage and before the last, the session is running."""
+    _, session_id = start_research(session_factory)
+
+    await make_runner(session_factory, registry, provider).run_one()
+
+    with session_factory() as session:
+        research = session.get(ResearchSession, _uuid(session_id))
+        assert research is not None
+        assert research.status is ResearchStatus.RUNNING

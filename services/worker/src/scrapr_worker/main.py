@@ -75,13 +75,13 @@ def build_registry() -> ToolRegistry:
 def build_runner(worker_id: str) -> JobRunner:
     """Wire the runner to its handlers.
 
-    The fake provider is loaded with one canned response per run; a real
-    provider needs no such priming, which is the only line here that changes
-    when `OPEN-04` closes.
+    The fake provider is given a *standing* answer rather than a queue: a worker
+    process serves an unbounded number of runs, and a queue of one would starve
+    the second one. Tests keep the strict queue, which is where running out of
+    responses is information rather than an outage.
     """
-    provider = FakeLLMProvider()
-    provider.enqueue(
-        SkeletonClaim(
+    provider = FakeLLMProvider(
+        standing_response=SkeletonClaim(
             section_title="Revenue",
             claim_text="The company reported $1.2bn revenue for FY2025.",
         )

@@ -13,9 +13,11 @@ build rather than production (implementation plan §6.2).
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from scrapr_api.errors import install_error_handlers
 from scrapr_api.routers import research
+from scrapr_core.config import get_settings
 
 __all__ = ["create_app"]
 
@@ -41,6 +43,19 @@ def create_app() -> FastAPI:
         # obscurity of hiding it.
         docs_url="/docs",
         openapi_url="/openapi.json",
+    )
+
+    # The web app is served from a different origin in development and may be in
+    # production. Credentials are allowed because the anonymous session cookie
+    # *is* the authorization; origins are therefore listed explicitly and never
+    # wildcarded, since `allow_origins=["*"]` with credentials would let any
+    # site on the internet read a visitor's research.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_settings().allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["content-type"],
     )
 
     install_error_handlers(app)

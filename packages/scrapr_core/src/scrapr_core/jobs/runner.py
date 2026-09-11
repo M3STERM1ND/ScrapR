@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from scrapr_core.db.base import utcnow
 from scrapr_core.db.enums import (
+    ResearchStatus,
     RunStatus,
     StepStatus,
     TerminationReason,
@@ -57,6 +58,15 @@ logger = logging.getLogger(__name__)
 RUNNABLE_STATUSES = (StepStatus.PENDING, StepStatus.FAILED)
 """`FAILED` is runnable: it means "this attempt failed", not "give up". Giving
 up is `DEAD`, which is terminal by design."""
+
+_SESSION_STATUS = {
+    RunStatus.COMPLETE: ResearchStatus.COMPLETE,
+    RunStatus.PARTIAL: ResearchStatus.PARTIAL,
+    RunStatus.FAILED: ResearchStatus.FAILED,
+    RunStatus.RUNNING: ResearchStatus.RUNNING,
+    RunStatus.PENDING: ResearchStatus.PENDING,
+}
+"""How a run's outcome reads to the person who asked the question."""
 
 
 class JobRunner:
@@ -193,6 +203,8 @@ class JobRunner:
             self._poison(session, run, step, f"no handler registered for {step.stage!r}")
             return
 
+        self._mark_started(session, run)
+
         context = StepContext(
             session=session,
             run=run,
@@ -214,6 +226,26 @@ class JobRunner:
             step.checkpoint = dict(checkpoint)
             session.flush()
             self._complete(session, run, step)
+
+    def _mark_started(self, session: Session, run: ResearchRun) -> None:
+        """Move the run, and the research it belongs to, out of `pending`.
+
+        The session's status is what the workspace header reads
+        (`REQ-WORK-002`), so leaving it at `pending` while steps execute would
+        tell the user their research is queued while they watch it run.
+        """
+        if run.status is not RunStatus.PENDING:
+            return
+
+        run.status = RunStatus.RUNNING
+        if run.started_at is None:
+            run.started_at = utcnow()
+
+        research = session.get(ResearchSession, run.session_id)
+        if research is not None:
+            research.status = ResearchStatus.RUNNING
+            research.updated_at = utcnow()
+        session.flush()
 
     def _complete(self, session: Session, run: ResearchRun, step: RunStep) -> None:
         step.status = StepStatus.COMPLETE
@@ -295,6 +327,16 @@ class JobRunner:
                 else VersionStatus.FAILED
             )
             version.closed_at = utcnow()
+
+        # The session status is what the workspace header shows, so it has to
+        # end where the run ended. A run that failed and a session still reading
+        # "researching" is the exact shape of `REQ-AGENT-009 AC-3`: a result
+        # presented as something it is not.
+        research = session.get(ResearchSession, run.session_id)
+        if research is not None:
+            research.status = _SESSION_STATUS[status]
+            research.updated_at = utcnow()
+
         session.flush()
 
     def _owner_of(self, session: Session, run: ResearchRun) -> OwnerContext:

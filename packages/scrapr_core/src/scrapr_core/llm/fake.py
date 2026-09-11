@@ -13,6 +13,11 @@ instead of quietly proving the wrong thing.
 Deterministic by construction: responses are enqueued in the order they will be
 consumed, and a call with nothing left to return raises rather than inventing a
 value. A fake that improvises is a fake that hides a missing expectation.
+
+The one exception is opt-in and exists for the worker, not for tests. A running
+process answers an unbounded number of requests, so `standing_response` supplies
+an answer whenever the queue is empty. Tests leave it unset and keep the strict
+behaviour, which is the half that matters to them.
 """
 
 from __future__ import annotations
@@ -60,9 +65,16 @@ class RecordedCall:
 class FakeLLMProvider:
     """Returns pre-loaded responses in order, recording every call."""
 
-    def __init__(self, *, name: str = "fake", model: str = "fake-1") -> None:
+    def __init__(
+        self,
+        *,
+        name: str = "fake",
+        model: str = "fake-1",
+        standing_response: BaseModel | None = None,
+    ) -> None:
         self._name = name
         self._model = model
+        self._standing = standing_response
         self._responses: deque[BaseModel] = deque()
         self._calls: list[RecordedCall] = []
 
@@ -102,13 +114,14 @@ class FakeLLMProvider:
             )
         )
 
-        if not self._responses:
+        if not self._responses and self._standing is None:
             raise NoCannedResponseError(
                 f"the fake provider was asked for a {schema.__name__} but has no "
                 "responses left; enqueue one in the test"
             )
 
-        response = self._responses.popleft()
+        response = self._responses.popleft() if self._responses else self._standing
+        assert response is not None  # noqa: S101 - narrowed by the check above
         if not isinstance(response, schema):
             raise NoCannedResponseError(
                 f"the next canned response is {type(response).__name__}, but the "

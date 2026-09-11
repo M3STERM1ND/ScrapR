@@ -7,9 +7,11 @@ Turns a question into an evidence-backed report with sources, analysis, charts a
 session, the local runner executes a two-stage pipeline over `run_steps` against
 a fixture tool and a fake LLM, one evidence-backed fact claim persists with its
 source and retrieval timestamp, the validation gate passes it, and
-`GET /v1/research/{id}/versions/1` returns it with the activity timeline. What
-remains in Phase 0 is the product frontend — intake, workspace and activity
-surfaces. See
+`GET /v1/research/{id}/versions/1` returns it with the activity timeline — and
+the workspace renders it in a browser. Ask a question at `/research/new`, watch
+the activity fill in, read the report with a citation and a retrieval date on
+the claim. What remains in Phase 0 is finishing the landing page's remaining
+sections. See
 `docs/superpowers/specs/implementation-plan.md` §13 for the phase plan and
 `docs/decisions/` for resolved open questions.
 
@@ -18,7 +20,11 @@ surfaces. See
 ## Layout
 
 ```
-apps/web/             Next.js 16 · React 19 · Tailwind v4 (landing page built)
+apps/web/             Next.js 16 · React 19 · Tailwind v4
+  src/app/(marketing)/  landing page
+  src/app/(app)/        intake and workspace
+  src/lib/api/          generated types plus the typed client
+  e2e/                  Playwright smoke suite
 services/api/         FastAPI entrypoint, thin
 services/worker/      worker entrypoint, thin
 packages/scrapr_core/ all Python domain logic
@@ -95,6 +101,8 @@ uv run pytest --cov
 # Frontend
 cd apps/web && npm run dev          # localhost:3000
 cd apps/web && npm run build
+cd apps/web && npm run e2e          # Playwright; builds and serves the app
+cd apps/web && npm run lighthouse   # performance and accessibility budget
 
 # Migrations
 uv run alembic upgrade head         # apply
@@ -104,6 +112,9 @@ uv run alembic revision --autogenerate -m "what changed"
 # Run the API and the worker
 uv run uvicorn scrapr_api.main:app --reload --port 8000
 uv run scrapr-worker
+
+# The whole thing, end to end: all three of the above plus `npm run dev`,
+# then open http://localhost:3000/research/new
 
 # The API contract, after any route or schema change
 uv run python packages/contracts/export_openapi.py   # regenerate openapi.json
@@ -143,6 +154,19 @@ registry freezes before a run starts.
 FastAPI app and `apps/web/src/lib/api/schema.ts` comes from `openapi.json`. Both
 are committed and CI fails if either is stale, so a route change that breaks the
 frontend breaks the build instead of production. Never hand-edit either file.
+
+**The product surface extends the landing design system; it does not restart
+it.** Palette, type, spacing, radii and shadows are inherited unchanged. What it
+adds is a semantic layer on non-colour channels — rule treatment, weight, glyph,
+position — because the workspace renders far more simultaneous states than a
+two-colour accent cap can carry, and because `NFR-USE-002` forbids signalling
+claim type or confidence by colour alone. Print the report in greyscale and
+nothing is lost. See `design-system/MASTER.md` and implementation plan §11.4.
+
+**Base CSS belongs in `@layer base`.** Unlayered CSS outranks every cascade
+layer, so a bare `* { border-color }` silently beats the utilities that set one.
+That is not a style preference; it is what once made every claim-type rule
+render the same grey.
 
 **Job state lives in Postgres.** A run is rows in `research_runs` and
 `run_steps`; a worker claims a step with `FOR UPDATE SKIP LOCKED`, checkpoints

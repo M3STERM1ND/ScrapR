@@ -73,46 +73,52 @@
   color-scheme: light;
 }
 
-* {
-  border-color: var(--color-line);
-}
+/* These are base styles and must live in the base layer.
+   Unlayered CSS outranks every cascade layer, so `* { border-color }` written
+   at the top level silently beat the utilities that set a border colour — which
+   is how claim-type rules lost the one channel that distinguishes them. */
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
 
-html {
-  -webkit-text-size-adjust: 100%;
-  scroll-behavior: smooth;
-}
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
 
-body {
-  background-color: var(--color-paper);
-  color: var(--color-ink-soft);
-  font-family: var(--font-sans);
-  font-size: var(--text-body);
-  line-height: 1.62;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  font-synthesis-weight: none;
-}
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink-soft);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-synthesis-weight: none;
+  }
 
-h1,
-h2,
-h3,
-h4 {
-  font-family: var(--font-display);
-  color: var(--color-ink);
-  font-weight: 600;
-  letter-spacing: -0.028em;
-  text-wrap: balance;
-}
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    color: var(--color-ink);
+    font-weight: 600;
+    letter-spacing: -0.028em;
+    text-wrap: balance;
+  }
 
-::selection {
-  background: var(--color-ochre);
-  color: #fff;
-}
+  ::selection {
+    background: var(--color-ochre);
+    color: #fff;
+  }
 
-:focus-visible {
-  outline: 2px solid var(--color-ochre-deep);
-  outline-offset: 3px;
-  border-radius: 4px;
+  :focus-visible {
+    outline: 2px solid var(--color-ochre-deep);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
 }
 
 /* ---------- Composed utilities ---------- */
@@ -201,4 +207,131 @@ h4 {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ==========================================================================
+   Product surface — the semantic layer
+   ==========================================================================
+
+   The marketing rules "ochre at most twice per viewport" and "no third colour"
+   are right for a landing page and unworkable here: the workspace renders four
+   claim types, several confidence levels, four source states, three activity
+   statuses and two conflict states at once (implementation plan §11.4).
+
+   So the product inherits the palette, type, spacing, radii and shadows
+   unchanged, and carries its distinctions on NON-COLOUR channels — rule
+   treatment, weight, glyph and position. That is not only a design preference:
+   `REQ-SYNTH-002 AC-3` and `NFR-USE-002` forbid signalling claim type or
+   confidence by colour alone, so a reader with any colour vision, or a printed
+   page, loses nothing.
+
+   Phase 0 defines the subset the walking skeleton renders. The full layer lands
+   in Phase 3 with REQ-WORK-002..009.
+   -------------------------------------------------------------------------- */
+
+@utility claim {
+  padding-left: 1.25rem;
+  border-left-width: 2px;
+  border-left-style: solid;
+  border-left-color: var(--color-line-strong);
+}
+
+/* Fact: stated plainly, in the darkest ink, behind a solid rule. The most
+   confident treatment in the system, and the only one that must be evidenced. */
+@utility claim-fact {
+  border-left-style: solid;
+  border-left-color: var(--color-ink);
+  color: var(--color-ink);
+}
+
+/* Analysis: ScrapR's reading of the evidence. A dashed rule says "derived". */
+@utility claim-analysis {
+  border-left-style: dashed;
+  border-left-color: var(--color-ink-muted);
+  color: var(--color-ink-soft);
+}
+
+/* Forecast: about the future, and only valid with assumptions attached. Dotted
+   rule plus the ochre that the rest of the product spends sparingly. */
+@utility claim-forecast {
+  border-left-style: dotted;
+  border-left-color: var(--color-ochre);
+  color: var(--color-ink-soft);
+}
+
+/* Uncertainty: a named gap. Lighter ink, italic, open rule — it should read as
+   less settled than everything around it, because it is. */
+@utility claim-uncertainty {
+  border-left-style: solid;
+  border-left-color: var(--color-line);
+  color: var(--color-ink-muted);
+  font-style: italic;
+}
+
+/* The type label that rides beside every claim. Non-colour channel number two:
+   the word itself, always present, never inferred from styling alone. */
+@utility claim-label {
+  font-size: var(--text-micro);
+  font-weight: 500;
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Activity ---- */
+
+@utility status-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  flex: none;
+}
+
+@utility status-running {
+  background: var(--color-ochre);
+  animation: status-pulse 1.8s var(--ease-out-expo) infinite;
+}
+
+@utility status-done {
+  background: var(--color-ink);
+}
+
+@utility status-failed {
+  background: transparent;
+  border: 1.5px solid var(--color-ink-muted);
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-running {
+    animation: none;
+  }
+}
+
+/* ---- Product chrome ---- */
+
+/* An inset well. Inputs and evidence panels sit in it, so the page reads as
+   paper with things pressed into it rather than boxes stacked on top. */
+@utility well {
+  background: var(--color-sunk);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+@utility card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft);
 }

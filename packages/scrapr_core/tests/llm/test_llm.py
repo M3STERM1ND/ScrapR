@@ -206,3 +206,34 @@ def test_a_document_needs_a_label() -> None:
             content=Untrusted("text", SourceRef("web", "https://a.example")),
             label="  ",
         )
+
+
+async def test_a_standing_response_answers_every_call() -> None:
+    """What a long-running worker needs: a queue of one starves the second run.
+
+    Opt-in, because for a test "no responses left" is information — it says an
+    expectation is missing — and that has to stay the default.
+    """
+    provider = FakeLLMProvider(
+        standing_response=Extraction(statement="always this", value=1)
+    )
+
+    first = await provider.complete_structured(INSTRUCTION, [], Extraction)
+    second = await provider.complete_structured(INSTRUCTION, [], Extraction)
+
+    assert first.value.statement == second.value.statement == "always this"
+
+
+async def test_enqueued_responses_still_come_first() -> None:
+    """The standing answer is a floor, not an override: a test that enqueues a
+    specific response still gets it."""
+    provider = FakeLLMProvider(
+        standing_response=Extraction(statement="fallback", value=0)
+    )
+    provider.enqueue(Extraction(statement="specific", value=1))
+
+    first = await provider.complete_structured(INSTRUCTION, [], Extraction)
+    second = await provider.complete_structured(INSTRUCTION, [], Extraction)
+
+    assert first.value.statement == "specific"
+    assert second.value.statement == "fallback"

@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "generate:api": "openapi-typescript ../../packages/contracts/openapi.json -o src/lib/api/schema.ts",
-    "check:api": "npm run generate:api && git diff --exit-code src/lib/api/schema.ts"
+    "check:api": "npm run generate:api && git diff --exit-code src/lib/api/schema.ts",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "lighthouse": "lhci autorun"
   },
   "dependencies": {
     "motion": "^13.2.0",
@@ -17,6 +20,8 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@lhci/cli": "^0.15.1",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

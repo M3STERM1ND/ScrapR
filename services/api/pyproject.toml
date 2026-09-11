@@ -1,0 +1,20 @@
+[project]
+name = "scrapr-api"
+version = "0.1.0"
+description = "FastAPI entrypoint. Thin by design: routing, dependency resolution and error shaping only. All domain logic lives in scrapr-core."
+requires-python = ">=3.12"
+dependencies = [
+    "scrapr-core",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+]
+
+[tool.uv.sources]
+scrapr-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scrapr_api"]

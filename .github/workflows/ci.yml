@@ -1,0 +1,129 @@
+# Continuous integration.
+#
+# Three Python gates and one frontend gate, in separate jobs so a lint failure
+# and a test failure are reported together rather than one hiding the other.
+#
+# Migrations are NOT run automatically on boot anywhere (implementation plan
+# §12); here they run as an explicit step, which is also what exercises them —
+# the tests migrate a scratch database rather than calling `create_all`, because
+# it is the migrations that ship.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  # A new push supersedes the run in flight for the same ref.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Matches docker-compose.yml, so a failure reproduces locally with the same
+  # connection string.
+  DATABASE_URL: postgresql+psycopg://scrapr:scrapr_local_dev_only@localhost:5432/scrapr
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run ruff check packages/ services/
+
+  types:
+    name: mypy --strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      # The type checker is the enforcement mechanism for the trust boundary
+      # (§9), not a nice-to-have: security, llm and tools are checked with no
+      # escape hatches at all.
+      - run: uv run mypy packages/scrapr_core/src services
+
+  test:
+    name: pytest + coverage
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scrapr
+          POSTGRES_PASSWORD: scrapr_local_dev_only
+          POSTGRES_DB: scrapr
+        ports:
+          - 5432:5432
+        # Without this the first connection races the server's startup.
+        options: >-
+          --health-cmd "pg_isready -U scrapr -d scrapr"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+      - name: Run tests
+        # The 80% floor is configured in pyproject.toml, so it cannot differ
+        # between a developer machine and CI.
+        run: uv run pytest --cov
+
+  contract:
+    name: openapi contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: uv sync --group dev
+      # The committed document must match the application. A stale contract is
+      # a frontend generated against routes that no longer exist.
+      - name: Check openapi.json is current
+        run: uv run python packages/contracts/export_openapi.py --check
+      - run: npm ci
+        working-directory: apps/web
+      # And the committed TS types must match the document, so the break lands
+      # here rather than in a runtime shape mismatch nobody typed against.
+      - name: Check generated types are current
+        run: npm run check:api
+        working-directory: apps/web
+
+  web:
+    name: web build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm run build

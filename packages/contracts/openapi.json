@@ -1,0 +1,913 @@
+{
+  "components": {
+    "schemas": {
+      "ActivityEventOut": {
+        "description": "One timeline entry. User-facing text only (`REQ-ACT-003`).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ActivityStatus"
+          },
+          "tool_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Category"
+          }
+        },
+        "required": [
+          "seq",
+          "label",
+          "status",
+          "tool_category",
+          "created_at"
+        ],
+        "title": "ActivityEventOut",
+        "type": "object"
+      },
+      "ActivityPage": {
+        "description": "Events after a sequence number, plus where to resume from.\n\n`next_after` is what the client sends back, so the polling loop never has to\nreason about timestamps \u2014 and the Phase 3 SSE upgrade resumes from exactly\nthe same value (implementation plan \u00a76.3).",
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "next_after": {
+            "title": "Next After",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "next_after"
+        ],
+        "title": "ActivityPage",
+        "type": "object"
+      },
+      "ActivityStatus": {
+        "description": "Per-event status in the activity timeline (`REQ-ACT-004 AC-2`).",
+        "enum": [
+          "in_progress",
+          "complete",
+          "failed"
+        ],
+        "title": "ActivityStatus",
+        "type": "string"
+      },
+      "AuthorityTier": {
+        "description": "Source authority (`REQ-EVID-002`). Assignment rules are `OPEN-15`.",
+        "enum": [
+          "primary",
+          "secondary",
+          "lower"
+        ],
+        "title": "AuthorityTier",
+        "type": "string"
+      },
+      "ClaimOut": {
+        "description": "One assertion, typed, with the sources behind it (`REQ-SYNTH-002..003`).",
+        "properties": {
+          "claim_type": {
+            "$ref": "#/components/schemas/ClaimType"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_important": {
+            "title": "Is Important",
+            "type": "boolean"
+          },
+          "source_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Source Ids",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "claim_type",
+          "confidence",
+          "is_important",
+          "source_ids"
+        ],
+        "title": "ClaimOut",
+        "type": "object"
+      },
+      "ClaimType": {
+        "description": "Claim taxonomy (`REQ-SYNTH-002`).\n\nThe gate in `REQ-EVID-017 AC-1` is scoped to `FACT`, and\n`REQ-SYNTH-009` requires assumptions on `FORECAST`, so these two values are\nload-bearing rather than descriptive.",
+        "enum": [
+          "fact",
+          "analysis",
+          "forecast",
+          "uncertainty"
+        ],
+        "title": "ClaimType",
+        "type": "string"
+      },
+      "CreateResearchRequest": {
+        "description": "`REQ-INPUT-001..005`. Only the objective is required.",
+        "properties": {
+          "context_company": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Company"
+          },
+          "context_ticker": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Ticker"
+          },
+          "context_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Url"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions"
+          },
+          "objective": {
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Objective",
+            "type": "string"
+          }
+        },
+        "required": [
+          "objective"
+        ],
+        "title": "CreateResearchRequest",
+        "type": "object"
+      },
+      "CreateResearchResponse": {
+        "description": "202: the work is accepted, not finished (`REQ-AGENT-008 AC-1`).",
+        "properties": {
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "version_id",
+          "version_number"
+        ],
+        "title": "CreateResearchResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ResearchSessionOut": {
+        "description": "The session header the workspace renders around (`REQ-WORK-002`).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "objective": {
+            "title": "Objective",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ResearchStatus"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "subject_interpretation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Interpretation Note"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/VersionSummary"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "objective",
+          "subject",
+          "subject_interpretation_note",
+          "status",
+          "current_version_id",
+          "created_at",
+          "updated_at",
+          "versions"
+        ],
+        "title": "ResearchSessionOut",
+        "type": "object"
+      },
+      "ResearchStatus": {
+        "description": "Lifecycle of a research session.",
+        "enum": [
+          "pending",
+          "running",
+          "complete",
+          "partial",
+          "failed"
+        ],
+        "title": "ResearchStatus",
+        "type": "string"
+      },
+      "SectionOut": {
+        "description": "A report section and the claims it renders.",
+        "properties": {
+          "claim_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Claim Ids",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_executive_summary": {
+            "title": "Is Executive Summary",
+            "type": "boolean"
+          },
+          "ordering": {
+            "title": "Ordering",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "ordering",
+          "is_executive_summary",
+          "claim_ids"
+        ],
+        "title": "SectionOut",
+        "type": "object"
+      },
+      "SourceOut": {
+        "description": "Where a claim's evidence came from, and when it was read.\n\n`retrieved_at` is on the wire because `REQ-EVID-004` makes it part of what\nthe user is entitled to see, not internal bookkeeping.",
+        "properties": {
+          "authority_tier": {
+            "$ref": "#/components/schemas/AuthorityTier"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "retrieved_at": {
+            "format": "date-time",
+            "title": "Retrieved At",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "publisher",
+          "authority_tier",
+          "retrieved_at",
+          "published_at"
+        ],
+        "title": "SourceOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VersionOut": {
+        "description": "One whole version, in one response.",
+        "properties": {
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimOut"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SectionOut"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/VersionStatus"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "version_number",
+          "status",
+          "created_at",
+          "closed_at",
+          "sections",
+          "claims",
+          "sources"
+        ],
+        "title": "VersionOut",
+        "type": "object"
+      },
+      "VersionStatus": {
+        "description": "Lifecycle of one immutable version (`REQ-VER-002`).",
+        "enum": [
+          "building",
+          "complete",
+          "partial",
+          "failed"
+        ],
+        "title": "VersionStatus",
+        "type": "string"
+      },
+      "VersionSummary": {
+        "description": "One entry in the version list (`REQ-VER-008`).",
+        "properties": {
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/VersionStatus"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version_number",
+          "status",
+          "created_at",
+          "closed_at"
+        ],
+        "title": "VersionSummary",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Turns a question into an evidence-backed report with sources, analysis, charts and follow-up.",
+    "title": "ScrapR",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "description": "Liveness only. Deliberately does not touch the database: a health\ncheck that fails when Postgres blips takes the API down with it.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/v1/research": {
+      "post": {
+        "description": "Start research. **202**, because the answer does not exist yet.\n\nThe response is committed rows and nothing else: the run is picked up by\nwhatever is polling `run_steps`, which is what keeps `OPEN-03` a hosting\nquestion (implementation plan \u00a75.6).",
+        "operationId": "create_research_v1_research_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateResearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateResearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Research",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/v1/research/{session_id}": {
+      "get": {
+        "description": "The session header the workspace renders around (`REQ-WORK-002`).",
+        "operationId": "get_research_v1_research__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchSessionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Research",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/v1/research/{session_id}/activity": {
+      "get": {
+        "description": "Events newer than `after` (`REQ-ACT-001`, implementation plan \u00a76.3).\n\nPhase 1 ships polling. Phase 3 gives this same route a streaming content\ntype; because `seq` is already the resume key, that changes no schema, no\nroute and no client state model.",
+        "operationId": "get_activity_v1_research__session_id__activity_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Activity",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/v1/research/{session_id}/versions/{version_number}": {
+      "get": {
+        "description": "One version, denormalised into a single response (`NFR-PERF-004`).",
+        "operationId": "get_version_v1_research__session_id__versions__version_number__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_number",
+            "required": true,
+            "schema": {
+              "title": "Version Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Version",
+        "tags": [
+          "research"
+        ]
+      }
+    }
+  }
+}

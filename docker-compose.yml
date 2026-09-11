@@ -1,0 +1,35 @@
+# Local development dependencies only. Production topology is infra/ and is
+# still open: where workers execute and what dispatches them is OPEN-03.
+#
+# Postgres is the durable source of truth for job state (implementation plan
+# section 5.6), which is what lets a single-process local runner satisfy every
+# Phase 1 requirement without a queue existing yet.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: scrapr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scrapr
+      POSTGRES_PASSWORD: scrapr_local_dev_only
+      POSTGRES_DB: scrapr
+      # Deterministic collation, so ordering does not drift between a developer
+      # machine and CI.
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=en-US --encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Without a healthcheck, `docker compose up -d` returns before Postgres is
+      # accepting connections and the first migration run races it.
+      test: ["CMD-SHELL", "pg_isready -U scrapr -d scrapr"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+volumes:
+  postgres_data:
+    name: scrapr_postgres_data

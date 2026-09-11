@@ -586,7 +586,7 @@ The orchestrator MUST determine when enough evidence has been collected and term
 - `AC-3` A hard ceiling exists on total research effort per run so cost and latency are bounded (`NFR-COST-001`, `NFR-PERF-001`).
 - `AC-4` Termination due to hitting the ceiling rather than sufficiency is recorded and reflected in confidence (`REQ-EVID-015`).
 
-> **Blocked by `OPEN-13`.** The masterplan requires the agent to decide "whether more evidence is required" but defines no stopping rule. This is the single largest cost and latency lever in the product. `OPEN-13` MUST be resolved before Phase 1 implementation begins.
+> **Resolved by `DEC-04`** (`docs/decisions/OPEN-13.md`), which closes `OPEN-13`. Sufficiency is a question-coverage gate: an area terminates when every planned question is resolved by evidence or explicitly marked unanswerable, with a mandatory no-progress rule as a secondary stop. Effort is bounded per area by an allocation derived from unresolved question count, and per run by cost, wall clock, and tool calls, whichever binds first. Ceiling-reached termination is distinct from sufficiency and is disclosed per `REQ-SYNTH-010` and `REQ-AGENT-009`. The numeric ceiling values remain `TBD-04` and `TBD-10`.
 
 ---
 
@@ -1001,13 +1001,15 @@ Where applicable, evidence MUST record the relevant date or reporting period.
 ---
 
 **`REQ-EVID-010` — Claim formation** · **MUST**
-*Phase 2 · Verifies DoD 7 · Source: masterplan §5, §9*
+*Phase 1 · Verifies DoD 7 · Source: masterplan §5, §9*
 
 Report content MUST be organized as claims, each with a claim type, supporting evidence, and confidence.
 
 **Acceptance criteria**
 - `AC-1` A claim records its text, type (`REQ-SYNTH-001`), supporting evidence, confidence, and any conflicting evidence.
 - `AC-2` Claims persist independently of rendered report text.
+
+> **Phase split (`DEC-05`).** Phase 1 populates claim text, type, and supporting-evidence links, because `REQ-EVID-017` is a Phase 1 requirement and cannot reject an unevidenced fact claim before claims exist. The confidence and conflicting-evidence halves of `AC-1` populate in Phase 2 with `REQ-EVID-015` and `REQ-EVID-012`; both fields are nullable until then.
 
 ---
 
@@ -1095,7 +1097,7 @@ A factual claim MUST NOT appear in the report without linked supporting evidence
 ---
 
 **`REQ-EVID-018` — Never assert reading inaccessible content** · **MUST**
-*Phase 2 · Source: masterplan §23*
+*Phase 1 · Source: masterplan §23*
 
 The system MUST NEVER claim to have read content it could not access.
 
@@ -1224,7 +1226,7 @@ The product MUST provide analytical assessment and MUST NOT provide personalized
 ---
 
 **`REQ-SYNTH-009` — Forecast assumptions disclosed** · **MUST**
-*Phase 2 · Verifies DoD 9 · Source: masterplan §5, §15*
+*Phase 1 · Verifies DoD 9 · Source: masterplan §5, §15*
 
 Every forecast MUST state the assumptions it depends on.
 
@@ -1235,7 +1237,7 @@ Every forecast MUST state the assumptions it depends on.
 ---
 
 **`REQ-SYNTH-010` — Explicit insufficiency** · **MUST**
-*Phase 2 · Verifies DoD 9 · Source: masterplan §5, §23*
+*Phase 1 · Verifies DoD 9 · Source: masterplan §5, §23*
 
 Where evidence is insufficient to answer part of the objective, the report MUST say so explicitly.
 
@@ -2095,8 +2097,8 @@ Stores URL or identifier, source name, source category, authority level, retriev
 **`REQ-DATA-005` — Evidence** · **MUST** · *Phase 1 · Source: masterplan §9*
 Stores extracted information, its source relationship, the relevant date or reporting period, and confidence/provenance.
 
-**`REQ-DATA-006` — Claim** · **MUST** · *Phase 2 · Source: masterplan §9*
-Stores claim text, claim type, supporting evidence, confidence, and conflicting evidence.
+**`REQ-DATA-006` — Claim** · **MUST** · *Phase 1 · Source: masterplan §9*
+Stores claim text, claim type, supporting evidence, confidence, and conflicting evidence. Phase 1 creates the entity and populates text, type, and supporting evidence; the confidence and conflicting-evidence fields are nullable and populate in Phase 2 (`DEC-05`, `REQ-EVID-010`).
 
 **`REQ-DATA-007` — Report Section** · **MUST** · *Phase 1 · Source: masterplan §9*
 Stores section title, generated content, its claims, its visualizations, and ordering.
@@ -2491,16 +2493,19 @@ The eight phases are the masterplan's, unchanged. Each phase has a success condi
 ### Phase 1 — Research Engine Foundation
 
 **Goal:** Prove the core research loop.
-**Requirements:** `REQ-INPUT-001..003`, `REQ-INPUT-005..007`, `REQ-AGENT-001..010`, `REQ-TOOL-001..007`, `REQ-TOOL-009..013`, `REQ-ACT-001`, `REQ-EVID-001`, `REQ-EVID-004`, `REQ-EVID-007`, `REQ-EVID-017`, `REQ-SYNTH-003..005`, `REQ-DATA-002`, `REQ-DATA-004`, `REQ-DATA-005`, `REQ-DATA-007`, `REQ-DATA-011`, `REQ-TECH-001..010`, `REQ-SEC-007`, `REQ-SEC-012..014`
-**Blocking open questions:** `OPEN-03`, `OPEN-04`, `OPEN-05`, `OPEN-06`, `OPEN-07`, `OPEN-08`, `OPEN-09`, `OPEN-10`, `OPEN-13`
+**Requirements:** `REQ-INPUT-001..003`, `REQ-INPUT-005..007`, `REQ-AGENT-001..010`, `REQ-TOOL-001..007`, `REQ-TOOL-009..013`, `REQ-ACT-001`, `REQ-EVID-001`, `REQ-EVID-004`, `REQ-EVID-007`, `REQ-EVID-010`, `REQ-EVID-017..018`, `REQ-SYNTH-001`, `REQ-SYNTH-003..005`, `REQ-SYNTH-009..010`, `REQ-DATA-002`, `REQ-DATA-004..007`, `REQ-DATA-011`, `REQ-TECH-001..010`, `REQ-SEC-007`, `REQ-SEC-012..014`
+**Blocking open questions:** `OPEN-03`, `OPEN-04`, `OPEN-05`, `OPEN-06`, `OPEN-07`, `OPEN-08`, `OPEN-09`, `OPEN-10`
+`OPEN-13` is closed by `DEC-04`.
 **Exit condition:** One query reliably becomes a useful source-backed report.
 
 ### Phase 2 — Evidence & Trust
 
 **Goal:** Make the research explainable and honest about disagreement.
-**Requirements:** `REQ-EVID-002..003`, `REQ-EVID-005..006`, `REQ-EVID-008..016`, `REQ-EVID-018`, `REQ-SYNTH-001`, `REQ-SYNTH-006..010`, `REQ-DATA-006`, `REQ-DATA-012`
+**Requirements:** `REQ-EVID-002..003`, `REQ-EVID-005..006`, `REQ-EVID-008..009`, `REQ-EVID-011..016`, `REQ-SYNTH-006..008`, `REQ-DATA-012`
 **Blocking open questions:** `OPEN-14`, `OPEN-15`, `OPEN-16`
 **Exit condition:** The agent can explain where important information came from and identify disagreement.
+
+> **`DEC-05` moved six requirements out of this phase into Phase 1** (`REQ-EVID-010`, `REQ-EVID-018`, `REQ-SYNTH-001`, `REQ-SYNTH-009`, `REQ-SYNTH-010`, `REQ-DATA-006`). Phase 2 keeps what it was actually for: authority tiering, normalization, conflict detection and explanation, and confidence. The claim *entity* is Phase 1; claim *confidence* remains Phase 2.
 
 ### Phase 3 — Interactive Workspace
 
@@ -2564,9 +2569,9 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
-| `OPEN-03` | Which queue/worker technology for background research and export jobs, **and where do those workers execute**? Vercel is the confirmed deployment platform (`DEC-03`) and its serverless execution limits may be exceeded by research runs and export generation. The answer must state how a run exceeding that limit satisfies `NFR-REL-001`. See §11.5. | Phase 1 | A |
+| `OPEN-03` | Which queue/worker technology for background research and export jobs, **and where do those workers execute**? Vercel is the confirmed deployment platform (`DEC-03`) and its serverless execution limits may be exceeded by research runs and export generation. The answer must state how a run exceeding that limit satisfies `NFR-REL-001`. See §11.5. `websitedesign.md` says "Redis + workers"; that is shorthand, not a decision, and it says nothing about worker execution location. See implementation plan `N-05`. | Phase 1 | A |
 | `OPEN-04` | Which AI provider(s) and which model tiers for which stages? The abstraction is required (`REQ-TECH-006`); the default provider is not chosen. | Phase 1 | A |
-| `OPEN-10` | Which object storage provider? | Phase 1 | Both |
+| `OPEN-10` | Which object storage provider? `websitedesign.md` says "S3-compatible object storage", which names an API surface rather than a vendor and does **not** answer this. See implementation plan `N-05`. | Phase 1 | Both |
 | `OPEN-11` | Which authentication mechanism or provider? | Phase 5 | B |
 | `OPEN-12` | Does V1 actually need vector search, or is it deferrable? If needed, confirm a PostgreSQL extension suffices (`REQ-TECH-007`). | Phase 1 (decide), Phase 4 (deliver) | A |
 | `OPEN-25` | Which chart rendering approach, and how are charts rendered server-side for export? | Phase 3, Phase 7 | B |
@@ -2585,7 +2590,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
-| `OPEN-13` | **What are the research sufficiency and termination criteria?** The masterplan requires the agent to determine "whether more evidence is required" but defines no stopping rule. This is the largest cost and latency lever in the product and the most likely source of unbounded runs. Must define: the sufficiency signal, the per-area and per-run effort ceilings, and what happens when a ceiling is hit before sufficiency. | Phase 1 | A |
+| ~~`OPEN-13`~~ | **Closed by `DEC-04`**, 2026-09-09. Research sufficiency and termination criteria. See §13.10 and `docs/decisions/OPEN-13.md`. | — | — |
 | `OPEN-26` | What is the evidence cache lifetime, and which retrievals are freshness-sensitive enough to bypass it? | Phase 1 (design), Phase 6 (enforce) | A |
 | `OPEN-29` | What is the acceptable cost ceiling per research run, and what happens when a run approaches it? Sets `TBD-10` and `TBD-11`. | Phase 8 | Both |
 
@@ -2633,7 +2638,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 | `TBD-01` | Maximum objective length | `OPEN-23` |
 | `TBD-02` | Individual tool call timeout | `OPEN-23` |
 | `TBD-03` | Research run p50 completion time | `OPEN-23` |
-| `TBD-04` | Hard ceiling on a single research run | `OPEN-13`, `OPEN-23` |
+| `TBD-04` | Hard ceiling on a single research run | `OPEN-23` (mechanism fixed by `DEC-04`; value still unset) |
 | `TBD-05` | Maximum interval between activity events | `OPEN-23` |
 | `TBD-06` | Workspace render time p95 | `OPEN-23` |
 | `TBD-07` | Conversational answer latency p50 | `OPEN-23` |
@@ -2653,8 +2658,11 @@ Decisions the masterplan did not make and the team has since confirmed. These ar
 | `DEC-01` | **Frontend framework: Next.js**, satisfying the masterplan's requirement for a React-based application and its preference for a modern full-stack React framework. | `OPEN-01` | `REQ-TECH-001`, §11.2 | 2026-09-08 |
 | `DEC-02` | **Backend framework: FastAPI**, within the masterplan's requirement for a Python API/service layer. | `OPEN-02` | `REQ-TECH-002` | 2026-09-08 |
 | `DEC-03` | **Deployment platform: Vercel** for the Next.js frontend and the application API. Worker execution location remains open under `OPEN-03` — see §11.5. | `OPEN-28` | `REQ-TECH-010`, `OPEN-03`, §11.5 | 2026-09-08 |
+| `DEC-04` | **Research termination: a question-coverage gate.** An area is sufficient when every planned question is resolved by evidence (≥2 distinct accessible sources, ≥1 above `lower` tier; 1 source where it is `primary`) or explicitly marked unanswerable. A no-progress round is a mandatory secondary stop. Per-area effort is allocated from unresolved question count; per-run effort is bounded by cost, wall clock, and tool calls, whichever binds first. Ceiling-reached is distinct from sufficient, is recorded in `termination_reason`, lowers confidence, and is disclosed as `uncertainty` claims. Implemented as `CoverageGatePolicy`. A model sufficiency judge is deferred to V1.1 behind the same protocol. Full record: `docs/decisions/OPEN-13.md`. | `OPEN-13` | `REQ-AGENT-004`, `REQ-AGENT-005`, `REQ-AGENT-009`, `REQ-SYNTH-010`, `NFR-COST-001`, `NFR-PERF-002`, `TBD-04`, `TBD-10` | 2026-09-09 |
 
-**Open questions remaining: 26** of the 29 originally registered.
+| `DEC-05` | **Claims are a Phase 1 entity, claim confidence stays Phase 2.** Resolves the contradiction where `REQ-EVID-017` (Phase 1) rejects "any fact-type claim lacking evidence linkage" while the Claim entity, claim typing and the rest of the Phase 1 validation gate sat in Phase 2. Six requirements move to Phase 1: `REQ-EVID-010` (claim formation, confidence half deferred), `REQ-EVID-018` (never assert reading inaccessible content), `REQ-SYNTH-001` (claim type classification, already annotated Phase 1 but rostered Phase 2), `REQ-SYNTH-009` (forecast assumptions), `REQ-SYNTH-010` (explicit insufficiency, required by `DEC-04`'s ceiling disclosure), and `REQ-DATA-006` (Claim, confidence and conflict fields nullable until Phase 2). | `N-08` | §12 Phase 1 and Phase 2 rosters, `REQ-EVID-010`, `REQ-EVID-018`, `REQ-SYNTH-001`, `REQ-SYNTH-009`, `REQ-SYNTH-010`, `REQ-DATA-006` | 2026-09-09 |
+
+**Open questions remaining: 25** of the 29 originally registered.
 
 ---
 
@@ -2680,7 +2688,8 @@ These are not new product decisions; they are gaps the masterplan's own requirem
 
 | Risk | Why it exists | Where it is tracked |
 |---|---|---|
-| **Unbounded research runs** | The masterplan requires adaptive depth and agent-determined sufficiency but defines no stopping rule. Without one, cost and latency are unbounded. | `OPEN-13`, `REQ-AGENT-005` |
+| **Unbounded research runs** | *Mitigated by `DEC-04`.* The masterplan required adaptive depth and agent-determined sufficiency but defined no stopping rule. The coverage gate supplies one; the residual risk is that the numeric ceilings (`TBD-04`, `TBD-10`) ship unset. | `DEC-04`, `OPEN-23`, `OPEN-29`, `REQ-AGENT-005` |
+| **Coverage gate rests on question quality** | `DEC-04` measures sufficiency against the questions stage 2 plans. Vague or overlapping questions make coverage a meaningless gate, and a shallow area is declared sufficient. | `REQ-AGENT-002 AC-3`, `DEC-04` §12 |
 | **Anonymous research has no owner** | Full anonymous use (§17) and private-by-default (§18) are both required, but privacy needs an owner to isolate to. | `OPEN-17`, `REQ-AUTH-002`, `REQ-SEC-009` |
 | **Uncapped anonymous cost** | Anonymous users can trigger expensive research with no account to attribute or limit it. | `OPEN-18`, `REQ-SEC-010` |
 | **Conflict detection tuned too tight or too loose** | With no defined numeric tolerance, the product either reports rounding differences as conflicts or misses real disagreement. Both undermine the trust core. | `OPEN-16`, `REQ-EVID-012` |

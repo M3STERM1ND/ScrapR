@@ -1,0 +1,139 @@
+[project]
+name = "scrapr"
+version = "0.1.0"
+description = "ScrapR monorepo root. Not a distributable package; it exists to hold the uv workspace and the shared tool configuration."
+requires-python = ">=3.12"
+dependencies = [
+    "scrapr-core",
+    "scrapr-api",
+    "scrapr-worker",
+]
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+# packages/contracts holds generated artifacts — the OpenAPI document and the TS
+# types built from it — not a Python distribution.
+exclude = ["packages/contracts"]
+
+[tool.uv.sources]
+scrapr-core = { workspace = true }
+scrapr-api = { workspace = true }
+scrapr-worker = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    # FastAPI's TestClient is built on httpx, so the API suite needs it even
+    # though nothing in the application imports it.
+    "httpx>=0.28",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "mypy>=1.14",
+    "ruff>=0.9",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages", "services"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "B",         # bugbear
+    "UP",        # pyupgrade
+    "S",         # bandit
+    "ASYNC",     # async correctness
+    "RUF",
+]
+ignore = [
+    "E501",      # line length is the formatter's job
+]
+
+[tool.ruff.lint.isort]
+# The workspace packages are installed into the virtualenv, so without this
+# ruff sorts them as third-party and `scrapr_core` lands above `sqlalchemy`.
+known-first-party = ["scrapr_core", "scrapr_api", "scrapr_worker"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101"]        # assert is the point of a test
+"**/conftest.py" = ["S101"]
+
+# ---------------------------------------------------------------------------
+# mypy
+#
+# Strict everywhere it is affordable. The three packages named in the
+# implementation plan section 9 are the ones where a wrong call must be a type
+# error rather than a runtime surprise, so they get no escape hatches at all.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+warn_unused_ignores = true
+show_error_codes = true
+files = ["packages", "services"]
+mypy_path = "packages/scrapr_core/src:services/api/src:services/worker/src"
+explicit_package_bases = true
+namespace_packages = true
+
+[[tool.mypy.overrides]]
+module = [
+    "scrapr_core.security.*",
+    "scrapr_core.llm.*",
+    "scrapr_core.tools.*",
+]
+disallow_any_explicit = true
+disallow_any_generics = true
+disallow_untyped_defs = true
+disallow_untyped_calls = true
+warn_return_any = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests", "packages", "services"]
+# Shared database test helpers, importable from every suite.
+pythonpath = ["testing"]
+python_files = ["test_*.py"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+]
+markers = [
+    "adversarial: prompt-injection corpus, runs on every release (REQ-SEC-014 AC-3)",
+    "integration: requires a live Postgres from docker compose",
+]
+asyncio_mode = "auto"
+
+# ---------------------------------------------------------------------------
+# Coverage: 80% floor per the project testing standard.
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["packages", "services"]
+omit = [
+    "*/tests/*",
+    "*/migrations/*",
+    # A build script, run by hand and by CI, not exercised by the suite.
+    "packages/contracts/*",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]

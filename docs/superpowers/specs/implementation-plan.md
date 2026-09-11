@@ -19,16 +19,18 @@ Three rules govern everything below.
 
 ### 0.1 The central design problem
 
-The PRD registers **26 open questions**. Nine of them block Phase 1:
+The PRD registers **25 open questions**. Eight of them block Phase 1:
 
-`OPEN-03` (queue/worker + where workers run), `OPEN-04` (AI provider), `OPEN-05` (web search), `OPEN-06` (financial data), `OPEN-07` (filings), `OPEN-08` (jobs), `OPEN-09` (news), `OPEN-10` (object storage), `OPEN-13` (research termination).
+`OPEN-03` (queue/worker + where workers run), `OPEN-04` (AI provider), `OPEN-05` (web search), `OPEN-06` (financial data), `OPEN-07` (filings), `OPEN-08` (jobs), `OPEN-09` (news), `OPEN-10` (object storage).
+
+> **`OPEN-13` (research termination) was the ninth and is now closed** by `DEC-04`, recorded in `docs/decisions/OPEN-13.md` and logged in `PRD.md §13.10`. §5.4 records what that means for the code; it did not make the decision.
 
 If those are treated as prerequisites, nothing gets built for weeks. So the architecture's first job is to sort them into two piles:
 
 | Kind | Open questions | Consequence |
 |---|---|---|
 | **Late-binding.** A provider behind a contract the PRD already mandates. | `OPEN-04`, `OPEN-05`, `OPEN-06`, `OPEN-07`, `OPEN-08`, `OPEN-09`, `OPEN-10` | Build the contract and a fake. Real provider is a config change later. **Does not block Phase 1 code.** |
-| **Structural.** Changes the shape of the system, not just a plug. | `OPEN-03`, `OPEN-13` | **Genuinely blocks.** Must be answered before Phase 1 code that depends on it. |
+| **Structural.** Changes the shape of the system, not just a plug. | `OPEN-03` (`OPEN-13` was here until `DEC-04` closed it) | **Genuinely blocks.** Must be answered before Phase 1 code that depends on it. |
 
 `REQ-TOOL-001` (uniform tool contract), `REQ-TOOL-009` (add a tool without touching the orchestrator) and `REQ-TECH-006` (AI provider abstraction) already require the abstractions that make the first pile late-binding. This plan leans on that hard.
 
@@ -319,7 +321,7 @@ conflicts(
 conflict_evidence(conflict_id uuid, evidence_id uuid, label text, primary key (conflict_id, evidence_id))
 ```
 
-**`claims` is a Phase 1 table, not Phase 2.** `REQ-EVID-017` is a Phase 1 requirement and its `AC-1` rejects "any **fact-type** claim lacking evidence linkage", which requires both the Claim entity and claim typing in Phase 1. The PRD is internally inconsistent here: `REQ-SYNTH-001` is annotated Phase 1 in its own header but appears in §12's Phase 2 roster, and `REQ-DATA-006` is annotated Phase 2 in both places. See `N-08` in §14.2 — that inconsistency must be resolved in `PRD.md`, not here.
+**`claims` is a Phase 1 table, not Phase 2.** `REQ-EVID-017` is a Phase 1 requirement and its `AC-1` rejects "any **fact-type** claim lacking evidence linkage", which requires both the Claim entity and claim typing in Phase 1. The PRD was internally inconsistent here; `DEC-05` resolved it by moving `REQ-DATA-006`, `REQ-EVID-010`, `REQ-SYNTH-001` and three others into Phase 1, with claim confidence left in Phase 2. `N-08` in §14.2 records the closure.
 
 Phase 1 populates `text`, `claim_type`, and the evidence links. `confidence` and `confidence_inputs` stay empty until `REQ-EVID-015` in Phase 2, which is why both are nullable or defaulted.
 
@@ -510,9 +512,11 @@ Two things this buys:
 1. **Structured output everywhere.** Every stage that uses the model returns a validated Pydantic model, never free prose that later needs parsing. Extraction returns evidence records; synthesis returns claims; conflict explanation returns a category plus text. Free prose appears only in section body text and conversational answers, and even those carry claim references.
 2. **Tiering is explicit.** `OPEN-04` asks which model tier for which stage. The `ModelTier` enum makes that a config table rather than scattered decisions.
 
-### 5.4 Termination — the `OPEN-13` shape
+### 5.4 Termination — resolved by `DEC-04`
 
-**This plan does not answer `OPEN-13`.** It specifies the interface the answer plugs into, so Phase 1 can be built up to that seam.
+**`OPEN-13` is closed.** The decision is `DEC-04`, recorded in full at `docs/decisions/OPEN-13.md` and logged in `PRD.md §13.10`. This section states what plugs into the seam and what the code owes; the decision record is authoritative on the rule itself.
+
+The interface is unchanged from the shape this plan originally specified.
 
 ```python
 class SufficiencyVerdict:
@@ -524,22 +528,30 @@ class TerminationPolicy(Protocol):
     def assess(self, area: ResearchArea, budget: RunBudget) -> SufficiencyVerdict: ...
 ```
 
-What the eventual answer must supply, per `OPEN-13`: the sufficiency signal, per-area and per-run effort ceilings, and behaviour when a ceiling is hit before sufficiency.
+**The implementation is `CoverageGatePolicy`.** Sufficiency is question coverage, not a model call and not an iteration count:
 
-What is already fixed regardless of the answer:
+| Element | `DEC-04` |
+|---|---|
+| **Sufficiency signal** | Every question stage 2 planned for the area is `resolved` (≥ `MIN_SOURCES_PER_QUESTION` distinct accessible sources yielding evidence, ≥1 above `lower` tier; one source suffices when it is `primary`) or explicitly `unanswerable`. Evaluated as a query over `sources` and `evidence`. |
+| **Per-area ceiling** | Derived, not constant: rounds allocated from the area's unresolved question count, clamped to a floor and a cap. This is what makes `REQ-AGENT-004 AC-2` structural. |
+| **No-progress rule** | A round adding zero new distinct sources ends the area with `ceiling_reached`, regardless of remaining allocation. **Mandatory**, and what makes `AC-1` hold without burning the full ceiling. |
+| **Per-run ceiling** | `RunBudget` bounds cost, wall clock and tool calls simultaneously; the run ends when any one is exhausted. Areas draw from a shared pool against a reservation, and unspent reservation returns to the pool. |
+| **Ceiling before sufficiency** | `ceiling_reached` is never collapsed into `sufficient`. `termination_reason = 'ceiling'`, open and unanswerable questions become `uncertainty` claims, the version completes as `partial`, and from Phase 2 confidence is lowered. |
 
-- A `RunBudget` exists and is decremented by every tool call and model call. `REQ-AGENT-005 AC-3` requires a hard ceiling.
-- `termination_reason` is persisted on `research_runs` (`AC-4`).
-- Ceiling-reached termination lowers confidence and is stated in the report (`REQ-EVID-015`, `REQ-AGENT-009 AC-4`).
-- No fixed iteration count may be the sole stopping rule (`AC-3`), so a naive `for _ in range(3)` is not an acceptable placeholder.
+What this changes structurally, and what it does not:
 
-**Interim posture:** a deliberately crude, clearly labelled `FixedBudgetPolicy` that stops on budget alone, used *only* to unblock Phase 0 and early Phase 1 pipeline development. It stops on a ceiling, which `AC-3` says cannot be the sole rule, so **it cannot ship** and must be replaced the moment `OPEN-13` resolves.
+- **Stage 2's questions become persisted rows**, `version_id`-scoped like every other research artefact per §4.1. This is the one schema consequence; there is no other.
+- `RunBudget` carries three counters rather than one.
+- **The validation gate in §5.5 needs no change.** `uncertainty` claims carry no evidence-linkage obligation, so an unanswered question passes the gate honestly and can never pass as a fact.
+- The sufficiency stage makes **no model call and no tool call**, so it adds nothing to `NFR-COST-001`.
 
-Marking it, without training anyone to ignore a red build:
+**`ProvisionalFixedBudgetPolicy` is retired.** It was the interim placeholder and it stopped on budget alone, which `AC-3` forbids as a sole rule. The three markers that kept it visible are now discharged:
 
-- The policy class name is `ProvisionalFixedBudgetPolicy` and its docstring names `OPEN-13`.
-- Its conformance test is `pytest.mark.skip(reason="blocked on OPEN-13: no sufficiency signal defined")`. Skipped, visible in the report, not red.
-- CI asserts `docs/decisions/OPEN-13.md` does not exist. When it does, the skip is removed and the real policy is required. One check, no standing red.
+- Delete the class.
+- Remove `pytest.mark.skip(reason="blocked on OPEN-13: no sufficiency signal defined")` from the termination conformance test, which becomes **required**. It is a pure unit test with no model in the loop: fixture the evidence rows, assert the verdict. `DEC-04 §10.3` lists the seven adversarial cases it must cover.
+- Remove the CI assertion that `docs/decisions/OPEN-13.md` does not exist. That file now exists, which is what discharges the check.
+
+**Deferred, behind the same protocol.** A `cheap`-tier model sufficiency judge is the V1.1 upgrade (`DEC-04 §9.1`). It was rejected for V1 on cost, on team size, and because its advantage depends on `OPEN-15` and `OPEN-16`, both Phase 2 — adopting it now would re-block Phase 1 on two further open questions. Because it satisfies the same `TerminationPolicy` protocol, adopting it later is a config change plus one class.
 
 ### 5.5 The validation gate
 
@@ -820,7 +832,7 @@ This is also the phase that converts seven Phase-1 open questions from blockers 
 
 ### Phase 1 — Research Engine Foundation
 
-**Blocked by:** `OPEN-13` only. `OPEN-04..10` are absorbed by Phase 0's fixtures and fakes; `OPEN-03` is removed from the critical path by §5.6's local runner.
+**Blocked by:** nothing. `OPEN-13` is closed by `DEC-04`; `N-08` is closed by `DEC-05`; `OPEN-04..10` are absorbed by Phase 0's fixtures and fakes; `OPEN-03` is removed from the critical path by §5.6's local runner.
 
 **A — one task per pipeline stage.** Each is a separate unit of work with a declared input type, output type and requirement set, because "orchestrator stages 1 through 7" is a phase, not a task.
 
@@ -830,7 +842,8 @@ This is also the phase that converts seven Phase-1 open questions from blockers 
 | 1.2 | Plan | questions → areas with candidate tool categories | `REQ-AGENT-002`, `REQ-AGENT-003` |
 | 1.3 | Retrieve | area → `ToolResult`/`ToolFailure`, budget-governed | `REQ-TOOL-001..007`, `REQ-TOOL-010..013` |
 | 1.4 | Extract | `Untrusted` content → evidence + source records | `REQ-EVID-001`, `REQ-EVID-004`, `REQ-EVID-007` |
-| 1.5 | Sufficiency | area + budget → `SufficiencyVerdict` | `REQ-AGENT-004`, `REQ-AGENT-005` · **blocked on `OPEN-13`** |
+| 1.5 | Sufficiency | area + budget → `SufficiencyVerdict` | `REQ-AGENT-004`, `REQ-AGENT-005` · `CoverageGatePolicy` per `DEC-04` |
+| 1.5a | Persist planned questions | area → question rows with `resolution_state` | prerequisite of 1.5; the one schema consequence of `DEC-04` |
 | 1.6 | Synthesize | evidence → typed claims, sections, ordering | `REQ-SYNTH-001`, `REQ-SYNTH-003..005` |
 | 1.7 | Validate | version → pass or reject | `REQ-EVID-017`, `REQ-SYNTH-009` (see gate note below) |
 | 1.8 | Partial-result handling | failures → degraded version, gaps named | `REQ-AGENT-009`, `REQ-TOOL-011` |
@@ -839,7 +852,7 @@ This is also the phase that converts seven Phase-1 open questions from blockers 
 
 1.1 through 1.8 can proceed against Phase 0's fixtures. 1.9 is six independent tasks that unblock one at a time as `OPEN-05..09` resolve, so no provider decision holds up the pipeline.
 
-**The validation gate grows across phases.** §5.5 lists the full rule set; Phase 1 enforces only the subset whose requirements exist by Phase 1 — fact claims need evidence (`REQ-EVID-017`), forecasts need assumptions (`REQ-SYNTH-009`), and no claim may cite an inaccessible source. Conflict, confidence and visualization rules switch on in Phases 2 and 3 with their requirements.
+**The validation gate grows across phases.** §5.5 lists the full rule set; Phase 1 enforces only the subset whose requirements exist by Phase 1 — fact claims need evidence (`REQ-EVID-017`), forecasts need assumptions (`REQ-SYNTH-009`), no claim may cite an inaccessible source (`REQ-EVID-018`), and an unevidenced objective component is stated as an uncertainty (`REQ-SYNTH-010`). Conflict, confidence and visualization rules switch on in Phases 2 and 3 with their requirements. `DEC-05` is what makes those four requirements Phase 1 in the PRD; before it, this note named requirements the roster placed in Phase 2.
 
 | B |
 |---|
@@ -905,10 +918,11 @@ Both: rate limiting, abuse controls, least privilege, injection hardening pass, 
 
 | ID | Needed to unblock | Phase |
 |---|---|---|
-| `OPEN-13` | Sufficiency signal, per-area and per-run effort ceilings, ceiling-before-sufficiency behaviour. Plugs into `TerminationPolicy` (§5.4). A fixed iteration count is explicitly not acceptable. | 1 |
 | `OPEN-14`, `OPEN-15`, `OPEN-16` | Confidence scale; tier assignment method; per-metric-class conflict tolerance. All three are the trust core; none can be improvised per run. | 2 |
 | `OPEN-25` | Chart renderer that works both client-side and headless server-side. | 3, 7 |
 | `OPEN-17` | **Semantics half only:** lifetime, expiry, and claim eligibility window. The identity half is Phase 0 and needs no decision — see §8. | 5 |
+
+**`OPEN-13` is closed.** `DEC-04` adopts a question-coverage gate; §5.4 records the consequences for the code and `docs/decisions/OPEN-13.md` is authoritative. Two things it deliberately left open, so they are not mistaken for settled: the numeric ceiling values stay with `OPEN-23` and `OPEN-29` as `TBD-04` and `TBD-10`, and `OPEN-15` still governs how `authority_tier` is assigned — the gate reads the column, which is `not null` at insert, so its accuracy improves when `OPEN-15` lands without a migration.
 
 **`OPEN-03` is no longer a Phase 1 blocker.** The PRD lists it as one. §5.6 removes it: Postgres holds job state, so a single-process local runner satisfies every requirement through Phase 1, and the queue becomes a concurrency concern in Phase 8. What remains open is where workers execute in production and what dispatches them, which is `N-04`.
 
@@ -922,19 +936,18 @@ The remaining registered questions (`OPEN-04..12`, `18..24`, `26`, `27`, `29`) a
 | `N-02` | **"Application API" in `REQ-TECH-010` is ambiguous.** Does FastAPI run on Vercel's Python runtime, or do Next.js route handlers front a FastAPI service hosted elsewhere? | Changes repo layout, latency budget, pooling, and whether SSE is viable. | Both |
 | `N-03` | **Activity transport is unspecified.** `REQ-ACT-001 AC-3` requires events during research but names no mechanism, and serverless constrains long-lived connections. | Determines whether SSE, WebSocket, or polling. Interacts with `N-02`. | B |
 | `N-04` | `OPEN-03` narrowed but not closed by §5.6. Recording this so the narrowing is not mistaken for a resolution. | — | A |
-| `N-05` | **The landing brief names Redis workers and S3-compatible storage; the PRD holds `OPEN-03` and `OPEN-10` open.** These may be real decisions that were never written into `§13.10`, or they may be casual shorthand. | If they are decisions, they should be logged as `DEC-04`/`DEC-05` with provenance. If not, they should stop being repeated as though settled. | Both |
-| `N-06` | **`websitedesign.md` is empty (0 bytes).** Referenced as a design specification but contains nothing. `design-system/MASTER.md` is currently the only written visual system. | Either fill it or delete it so it stops implying a spec exists. | B |
+| ~~`N-05`~~ | ~~**The landing brief names Redis workers and S3-compatible storage.**~~ **Resolved 2026-09-09: they are shorthand, not decisions.** The brief is `websitedesign.md`, a landing-page build spec. Its `STACK` block also reads "AI: LLM APIs" and "Research: Web search + specialized data APIs + News APIs", which are indisputably category placeholders, and the two contested lines sit at the same altitude in the same list. The lines that *did* become decisions carry independent provenance (masterplan §19 plus `DEC-01`, `DEC-02`, `DEC-03`); Redis and S3 have none, and masterplan §19 says only "object storage" and "a queue/worker architecture". | Neither `OPEN` closes under either reading. "S3-compatible" names an API surface, not a vendor, so it cannot answer `OPEN-10`. "Redis" answers at most half of `OPEN-03` and says nothing about where workers execute, which §5.6 defers to Phase 8 regardless. `websitedesign.md` now carries a dated note so the shorthand stops propagating. | Both |
+| `N-06` | **Correction, 2026-09-09: `websitedesign.md` is not empty.** This row previously read "empty (0 bytes)"; the file holds ~4.3 KB and was read in full while resolving `N-05`. The real gap is narrower: it is a **landing-page build brief**, not a design specification, and `design-system/MASTER.md` is the visual system derived from it. Nothing references the brief as a spec except this plan. | Downgraded from a content gap to a naming one. Either retitle it to what it is (a build brief) or fold its still-live constraints into `MASTER.md` and retire it. No longer blocks anything. | B |
 | `N-07` | **Evidence reuse across versions is unspecified.** §4.1 version-scopes everything for immutability, which means Update Research re-fetches rather than reusing. `REQ-TOOL-013` wants reuse for cost; `REQ-VER-003` wants freshness. The boundary between them is `OPEN-26`'s territory but is not stated as such. | Directly sets Update Research cost (`TBD-11`). | A |
-| `N-08` | **The PRD contradicts itself on when claims exist.** `REQ-SYNTH-001` is annotated `Phase 1` in its own header but sits in §12's **Phase 2** roster, and `REQ-DATA-006` (Claim) is annotated Phase 2 in both. Meanwhile `REQ-EVID-017` is Phase 1 and its `AC-1` rejects "any **fact-type** claim lacking evidence linkage". | **Phase 1's exit condition cannot be met as written**: it must reject fact-type claims using an entity Phase 1 is not allowed to build. Fix is three edits in `PRD.md` — add `REQ-SYNTH-001` and `REQ-DATA-006` to §12 Phase 1, and re-annotate `REQ-DATA-006` as Phase 1. Confidence stays Phase 2. | Both |
+| ~~`N-08`~~ | ~~**The PRD contradicts itself on when claims exist.**~~ **Resolved by `DEC-05`**, 2026-09-09. | The fix was **six** requirements, not the three this row originally estimated. `REQ-SYNTH-009` and `REQ-EVID-018` are named by §12's Phase 1 gate note but were rostered Phase 2, and `REQ-SYNTH-010` is required by `DEC-04`'s ceiling disclosure. All six now sit in Phase 1; claim confidence remains Phase 2. See `PRD.md §13.10`. | Both |
 
 ### 14.3 Recommended resolution order
 
-1. **`N-08`** — three line edits in `PRD.md`. Phase 1 is unbuildable until it is done.
-2. **`N-02`, `N-01`** — where the application API runs, and where Postgres runs. They set the deployment shape everything else assumes.
-3. **`OPEN-13`** — the last genuine Phase-1 blocker, and the only one this plan cannot design around.
-4. **`N-05`** — five minutes, and it stops Redis and S3 hardening into code as though they were decided.
+1. **`N-02`, `N-01`** — where the application API runs, and where Postgres runs. They set the deployment shape everything else assumes.
 
-`OPEN-03` has been removed from this list; see §14.1. Everything else follows its phase.
+Three items have been removed from this list. `OPEN-13` was the last genuine Phase-1 blocker and `DEC-04` closes it. `N-08` was item 1, without which Phase 1 was unbuildable, and `DEC-05` closes it. `N-05` was the last item and is resolved as shorthand; see §14.2. `OPEN-03` was removed earlier; see §14.1. Everything else follows its phase.
+
+**Nothing now blocks Phase 1 code.** `N-01` and `N-02` block Phase 1 *deployment*, not Phase 1 development, because §5.6's local runner and a local Postgres carry the pipeline through the phase.
 
 ---
 
@@ -956,7 +969,7 @@ The research loop is nondeterministic, so the test strategy has to be deliberate
 
 ## 16. What this plan does not do
 
-- It does not resolve a single `OPEN-xx`.
+- It does not resolve a single `OPEN-xx`. `OPEN-13` was closed by `DEC-04` in `docs/decisions/OPEN-13.md`, a decision record outside this plan; §5.4 records the consequence, it did not make the call.
 - It does not add, remove, or reinterpret a product requirement.
 - It does not specify visual design for the product surface beyond inheriting the landing tokens, or for the six export themes (`OPEN-22`).
 - It does not set any `TBD` numeric value.

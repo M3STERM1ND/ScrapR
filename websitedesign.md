@@ -10,6 +10,7 @@ Research: Web search + specialized data APIs + News APIs
 Storage: S3-compatible object storage
 Background jobs: Redis + workers
 Deployment: Vercel
+NOTE ADDED 2026-09-09 (resolves N-05 in the implementation plan): this STACK block is orientation for whoever builds the landing page. It is not an architecture decision record. Next.js, FastAPI, PostgreSQL and Vercel are confirmed elsewhere with provenance (DEC-01, DEC-02, REQ-TECH-003, DEC-03). The other four lines are category placeholders, not vendor choices, and the real decisions are still open: AI provider is OPEN-04, the research sources are OPEN-05 through OPEN-09, object storage provider is OPEN-10, and queue plus worker execution location is OPEN-03. Do not treat "S3-compatible" or "Redis" as settled. See PRD.md section 13 and implementation-plan.md section 14.2.
 Use the UI/UX Pro Max skill to define the design system
 Use Superpowers to plan, scaffold, run, and inspect the project
 DEFAULT TEXT (follow this exactly, it is where these builds usually fail)

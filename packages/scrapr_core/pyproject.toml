@@ -1,0 +1,19 @@
+[project]
+name = "scrapr-core"
+version = "0.1.0"
+description = "All ScrapR domain logic. The api and worker entrypoints are thin wrappers over this package, so that where workers run stays a deployment choice rather than a refactor (OPEN-03)."
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scrapr_core"]

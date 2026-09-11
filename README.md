@@ -2,16 +2,14 @@
 
 Turns a question into an evidence-backed report with sources, analysis, charts and follow-up.
 
-**Status: Phase 0, foundations.** The backend walking skeleton runs end to end:
-`POST /v1/research` creates a session and a version owned by an anonymous
-session, the local runner executes a two-stage pipeline over `run_steps` against
-a fixture tool and a fake LLM, one evidence-backed fact claim persists with its
-source and retrieval timestamp, the validation gate passes it, and
-`GET /v1/research/{id}/versions/1` returns it with the activity timeline — and
-the workspace renders it in a browser. Ask a question at `/research/new`, watch
-the activity fill in, read the report with a citation and a retrieval date on
-the claim. What remains in Phase 0 is finishing the landing page's remaining
-sections. See
+**Status: Phase 0 complete.** The walking skeleton runs end to end in a browser.
+Ask a question at `/research/new`, watch the activity timeline fill in as the
+worker executes the steps, and read the report that comes back with a citation
+and a retrieval date on the claim. Every seam in the architecture is crossed
+once: the tool contract, the model provider, the trust boundary, ownership, the
+durable job state machine, the validation gate, the HTTP surface and the
+generated client. Phase 1 replaces the two-stage skeleton with the real
+research pipeline, one stage at a time, against the same fixtures. See
 `docs/superpowers/specs/implementation-plan.md` §13 for the phase plan and
 `docs/decisions/` for resolved open questions.
 

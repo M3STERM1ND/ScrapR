@@ -37,7 +37,6 @@ from scrapr_core.db.enums import (
     ActivityStatus,
     ClaimType,
     EvidenceRole,
-    VersionStatus,
 )
 from scrapr_core.db.models import (
     Claim,
@@ -64,9 +63,9 @@ from scrapr_core.orchestrator.interpret import (
     ObjectiveInput,
     interpret,
 )
-from scrapr_core.orchestrator.outcome import AreaOutcome, summarise_run
+from scrapr_core.orchestrator.outcome import AreaOutcome, RunOutcome, summarise_run
 from scrapr_core.orchestrator.plan import plan_research
-from scrapr_core.orchestrator.retrieve import RetrievalCache, retrieve_area
+from scrapr_core.orchestrator.retrieve import RetrievalCache, RoundResult, retrieve_area
 from scrapr_core.orchestrator.sufficiency import (
     AreaProgress,
     CoverageGatePolicy,
@@ -82,7 +81,7 @@ from scrapr_core.orchestrator.synthesize import (
     with_area_gaps,
 )
 from scrapr_core.synthesis.validation import validate_version
-from scrapr_core.tools.contract import ToolCategory
+from scrapr_core.tools.contract import ToolCategory, ToolFailure
 from scrapr_core.tools.registry import ToolRegistry
 
 __all__ = [
@@ -288,12 +287,25 @@ class ResearchHandler:
             tool_category=categories[0].value if categories else None,
         )
 
+        # A round retrieves for every open question, and each question spans
+        # every category the plan chose, so a round costs questions by
+        # categories. Sizing the reservation by rounds and categories alone
+        # left any area of two or more questions unable to afford even its
+        # first round: the questions past the cap were skipped silently,
+        # without a tool call, a failure, or a word in the report.
         reservation = budget.reserve(
-            area_rounds(len(area_questions)) * max(1, len(categories))
+            area_rounds(len(area_questions))
+            * max(1, len(area_questions))
+            * max(1, len(categories))
         )
         rounds = 0
         new_sources_this_round = 0
         all_sources: set[UUID] = set()
+        # What the area could not reach. Accumulated here because the report
+        # owes the reader both by name (`REQ-AGENT-009 AC-2`), and a step
+        # checkpoint is the only place a later step can read them from.
+        skipped: set[ToolCategory] = set()
+        unread_sources = False
         verdict = self._assess(
             questions, area_name, version_id, rounds, new_sources_this_round, budget
         )
@@ -305,7 +317,7 @@ class ResearchHandler:
 
             before = len(all_sources)
             for question in open_questions:
-                await self._research_question(
+                result = await self._research_question(
                     context,
                     question,
                     categories,
@@ -316,6 +328,8 @@ class ResearchHandler:
                     cache,
                     all_sources,
                 )
+                skipped.update(result.skipped)
+                unread_sources = unread_sources or bool(result.failures)
 
             rounds += 1
             new_sources_this_round = len(all_sources) - before
@@ -340,6 +354,11 @@ class ResearchHandler:
             "sources": len(all_sources),
             "decision": verdict.decision,
             "rationale": verdict.rationale,
+            # Read back by `_area_outcomes`, which cannot recover either from
+            # the question rows: a category never reached leaves no trace in
+            # them, and neither does a source that could not be read.
+            "skipped_categories": sorted(category.value for category in skipped),
+            "unread_sources": unread_sources,
         }
 
     async def _research_question(
@@ -353,8 +372,14 @@ class ResearchHandler:
         reservation: AreaReservation,
         cache: RetrievalCache,
         all_sources: set[UUID],
-    ) -> None:
-        """One question, one round: retrieve, extract, record."""
+    ) -> RoundResult:
+        """One question, one round: retrieve, extract, record.
+
+        Returns the round so the area can accumulate what went unreached. The
+        caller needs it: a skipped category and an unreadable source are both
+        gaps the report owes the reader, and neither leaves a trace anywhere
+        else.
+        """
         result = await retrieve_area(
             question.area_name,
             categories,
@@ -385,6 +410,8 @@ class ResearchHandler:
                     "categories": [category.value for category in categories],
                 },
             )
+
+        return result
 
     def _assess(
         self,
@@ -465,7 +492,7 @@ class SynthesizeHandler:
             # (`REQ-EVID-017 AC-3`).
             raise StepPermanentError(report.summary())
 
-        _close_version(context, outcome.status)
+        _close_version(context, outcome)
 
         activity.append(
             research.id,
@@ -644,10 +671,16 @@ def _area_outcomes(
 
     Read back rather than carried forward: the research step may have run in a
     different process, and what the report says about coverage has to come from
-    the rows rather than from a variable that happened to survive.
+    the durable record rather than from a variable that happened to survive.
+
+    Two of the three inputs are question rows. The third — which categories an
+    area never reached, and whether a source could not be read — is read from
+    the research step's checkpoint, because neither leaves a mark on a question
+    row: a category that was skipped retrieved nothing to record.
     """
     version_id = context.run.version_id
     coverage = questions.coverage(version_id)
+    unreached = _unreached_by_area(context)
     outcomes: list[AreaOutcome] = []
 
     for area_name in dict.fromkeys(
@@ -659,39 +692,112 @@ def _area_outcomes(
             for question in area_questions
             if question.id in coverage
         )
-        unresolved = [
+        # `unanswerable` is terminal, not outstanding. `CoverageGatePolicy`
+        # treats it that way (`DEC-04 §3.3`) and this must agree with it:
+        # counting it as open reported an area that concluded honestly as one
+        # that ran out of road, and turned the run's termination reason from
+        # sufficiency into a ceiling.
+        still_open = [
             question
             for question in area_questions
-            if question.resolution_state is not QuestionState.RESOLVED
+            if question.resolution_state is QuestionState.OPEN
         ]
+        resolved = len(area_questions) - len(still_open)
+        skipped, unread = unreached.get(area_name, ((), False))
         outcomes.append(
             AreaOutcome(
                 area_name=area_name,
                 verdict=SufficiencyVerdict(
-                    decision="ceiling_reached" if unresolved else "sufficient",
+                    decision="ceiling_reached" if still_open else "sufficient",
                     rationale=(
-                        f"{len(area_questions) - len(unresolved)} of "
-                        f"{len(area_questions)} questions resolved"
+                        f"{resolved} of {len(area_questions)} questions resolved"
                     ),
                     area_name=area_name,
                 ),
                 evidence_count=sources,
+                failures=_UNREAD_MARKER if unread else (),
+                skipped_categories=skipped,
             )
         )
 
     return outcomes
 
 
-def _close_version(context: StepContext, status: VersionStatus) -> None:
-    """Record which outcome the version reached.
+def _unreached_by_area(
+    context: StepContext,
+) -> dict[str, tuple[tuple[ToolCategory, ...], bool]]:
+    """What each area could not reach, from the research step's checkpoint.
+
+    A missing or unreadable checkpoint yields nothing rather than raising: the
+    gaps it carries make the report more honest, and failing the run for want
+    of them would be the less honest outcome.
+    """
+    step = context.session.execute(
+        select(RunStep).where(
+            RunStep.run_id == context.run.id, RunStep.stage == RESEARCH_STAGE
+        )
+    ).scalar_one_or_none()
+
+    areas = (step.checkpoint or {}).get("areas") if step else None
+    if not isinstance(areas, list):
+        return {}
+
+    unreached: dict[str, tuple[tuple[ToolCategory, ...], bool]] = {}
+    for entry in areas:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("area")
+        if not isinstance(name, str):
+            continue
+
+        raw = entry.get("skipped_categories")
+        categories: list[ToolCategory] = []
+        if isinstance(raw, list):
+            for value in raw:
+                try:
+                    categories.append(ToolCategory(str(value)))
+                except ValueError:
+                    # A category that existed when the run started but not now.
+                    continue
+
+        unreached[name] = (tuple(categories), bool(entry.get("unread_sources")))
+
+    return unreached
+
+
+_UNREAD_MARKER: tuple[ToolFailure, ...] = (
+    ToolFailure(
+        kind="error",
+        message="a source could not be read during this area's research",
+        tool="",
+        category=ToolCategory.WEB_SEARCH,
+    ),
+)
+"""A stand-in failure, so `outcome._gaps` can say a source went unread.
+
+`AreaOutcome.failures` is only ever asked *whether* it is empty, and the
+provider detail that would fill it truthfully must never reach a user
+(`REQ-SEC-010`, `REQ-ACT-003`). One classified marker says the true thing
+without carrying anything that cannot be shown.
+"""
+
+
+def _close_version(context: StepContext, outcome: RunOutcome) -> None:
+    """Record which outcome the version reached, and why the run stopped.
 
     The runner closes the version when the last step completes; this is what
     says whether it closed as complete or as complete-with-gaps, which is the
     distinction `REQ-AGENT-009` exists to protect.
+
+    The termination reason is written here because the runner defers to it:
+    `JobRunner._finish_run` only defaults to `sufficiency` when the handler
+    recorded nothing, so a ceiling this step observed has to be written now or
+    be recorded as sufficiency forever (`REQ-AGENT-005 AC-4`, `DEC-04 §6.2`).
     """
     version = context.session.get(ResearchVersion, context.run.version_id)
     if version is not None:
-        version.status = status
+        version.status = outcome.status
+    context.run.termination_reason = outcome.termination_reason
     context.session.flush()
 
 

@@ -5,6 +5,17 @@ twice in one run is one source; the same URL seen again in a later version is a
 different record with a different retrieval timestamp, because `REQ-VER-002 AC-2`
 requires the earlier reading to survive untouched.
 
+The URL is **canonicalised before comparison** (`AC-1`). Until Phase 2 this
+column held the raw URL, so `?utm_source=news` produced a second source out of
+the same page and the unique constraint never fired -- corroboration invented
+out of a tracking parameter.
+
+**Tier is assigned here, at insert** (`DEC-08`), from a static rule table.
+Every consumer of `authority_tier` -- termination, confidence, conflict
+explanation -- reads what this writes, and `REQ-EVID-002 AC-3` requires the
+rule that fired be inspectable afterwards, so it is stored rather than
+recomputed.
+
 **A source is written before the evidence that depends on it** and in the same
 flush, so `REQ-EVID-001 AC-2` — no evidence without a source — holds even if the
 step dies between the two.
@@ -18,30 +29,41 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from scrapr_core.db.base import utcnow
-from scrapr_core.db.enums import AuthorityTier, NormalizationStatus
+from scrapr_core.db.enums import AuthorityTier
 from scrapr_core.db.models import Evidence, Source
+from scrapr_core.evidence.dedupe import normalize_url
+from scrapr_core.evidence.normalize import normalize_value
+from scrapr_core.evidence.tiering import assign_tier
 from scrapr_core.tools.contract import ToolItem
 
-__all__ = ["DEFAULT_TIER", "EvidenceRepository"]
-
-DEFAULT_TIER = AuthorityTier.SECONDARY
-"""How authority is assigned until `OPEN-15` decides.
-
-The middle tier, recorded with a rationale that says it is a default. The
-termination gate reads this column (`DEC-04 §3.2`), so it cannot be null; what it
-must not do is pretend to a judgement nobody has made yet.
-"""
-
-TIER_RATIONALE = {
-    "basis": "OPEN-15 unresolved; a default tier is recorded rather than guessed"
-}
+__all__ = ["EvidenceRepository"]
 
 
 class EvidenceRepository:
     """Persists what retrieval found."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        subject_hosts: frozenset[str] = frozenset(),
+        default_tier: AuthorityTier = AuthorityTier.LOWER,
+    ) -> None:
+        """Build a repository.
+
+        `subject_hosts` are the research subject's own domains, which `DEC-08`
+        rule 4 tiers as `PRIMARY` -- resolved once and passed in, so a re-run
+        cannot silently retier evidence written earlier.
+
+        `default_tier` is what an unlisted source gets. `LOWER` by decision
+        (`DEC-08 §4`), and injectable so the threshold can be dialled back
+        without editing the rule table: at `SECONDARY` two sources nobody
+        vouched for resolve a question between them, which is pre-`DEC-08`
+        behaviour.
+        """
         self._session = session
+        self._subject_hosts = subject_hosts
+        self._default_tier = default_tier
 
     def source_for(self, version_id: UUID, item: ToolItem) -> Source:
         """Find or create the source for a retrieved item.
@@ -50,25 +72,34 @@ class EvidenceRepository:
         unique index on `(version_id, url_normalized)` would otherwise turn a
         retry into an error.
         """
+        canonical = normalize_url(item.source_url)
+
         existing = self._session.execute(
             select(Source).where(
                 Source.version_id == version_id,
-                Source.url_normalized == item.source_url,
+                Source.url_normalized == canonical,
                 Source.identifier == item.source_identifier,
             )
         ).scalar_one_or_none()
         if existing is not None:
             return existing
 
+        tier = assign_tier(
+            url=item.source_url,
+            category=item.source_category,
+            subject_hosts=self._subject_hosts,
+            default=self._default_tier,
+        )
+
         source = Source(
             version_id=version_id,
             url=item.source_url,
-            url_normalized=item.source_url,
+            url_normalized=canonical,
             identifier=item.source_identifier,
             name=item.source_name,
             category=item.source_category,
-            authority_tier=DEFAULT_TIER,
-            tier_rationale=dict(TIER_RATIONALE),
+            authority_tier=tier.tier,
+            tier_rationale=tier.rationale,
             # The time the tool actually read it, never the time this row was
             # written (`REQ-EVID-004`, `REQ-TOOL-013 AC-2`).
             retrieved_at=item.retrieved_at,
@@ -104,15 +135,22 @@ class EvidenceRepository:
         if existing is not None:
             return existing
 
+        # `REQ-EVID-008`. Non-destructive by construction: the reported form
+        # goes in `value_raw` and is never overwritten, and a figure that
+        # cannot be normalised is marked rather than guessed at (`AC-2`,
+        # `AC-3`).
+        normalized = normalize_value(statement, currency_hint=_currency_hint(item))
+
         evidence = Evidence(
             version_id=version_id,
             source_id=source.id,
             content=statement,
             excerpt=excerpt,
-            # Normalisation is stage 5, which is Phase 2 work. Recording
-            # `not_applicable` says so honestly rather than implying a
-            # comparison that has not happened.
-            normalization=NormalizationStatus.NOT_APPLICABLE,
+            value_raw=normalized.reported if normalized.value is not None else None,
+            value_numeric=normalized.value,
+            value_normalized=normalized.value if normalized.comparable else None,
+            currency=normalized.currency,
+            normalization=normalized.status,
             extracted_at=utcnow(),
         )
         self._session.add(evidence)
@@ -127,3 +165,20 @@ class EvidenceRepository:
             .scalars()
             .all()
         )
+
+
+def _currency_hint(item: ToolItem) -> str | None:
+    """The currency a provider stated beside the figure, if any.
+
+    Used only when the statement text does not name one. A hint never overrides
+    what the source wrote: `REQ-EVID-008 AC-2` is about retaining what was
+    reported, and silently relabelling a figure's currency would break that
+    more thoroughly than failing to normalise it at all.
+    """
+    structured = item.structured
+    if not structured:
+        return None
+    currency = structured.get("currency")
+    if isinstance(currency, str) and currency.strip():
+        return currency.strip().upper()
+    return None

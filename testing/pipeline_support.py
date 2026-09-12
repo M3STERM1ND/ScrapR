@@ -49,13 +49,20 @@ def search_tool(
     name: str = "fixture_search",
     category: ToolCategory = ToolCategory.WEB_SEARCH,
     texts: Sequence[str] = (REVENUE_TEXT, HIRING_TEXT),
-    host: str = "acme.example",
+    host: str = "reuters.com",
 ) -> FixtureTool:
     """A provider returning distinct sources.
 
     Distinct matters: `MIN_SOURCES_PER_QUESTION` is two, so a fixture returning
     one source would leave every question open and make every test a ceiling
     test by accident.
+
+    The host matters too, now that `DEC-08` tiers on it. A question resolves on
+    two distinct sources of which **at least one is above `LOWER`**, so a
+    fixture on an unlisted domain leaves every question open — which is correct
+    behaviour and a useless default for a test about something else. These
+    hosts are on the publisher allowlist, which is what real web search
+    returns some of.
     """
     return FixtureTool(
         name=name,
@@ -78,7 +85,7 @@ def fixture_registry() -> ToolRegistry:
     registry.register(search_tool())
     registry.register(
         search_tool(
-            name="fixture_news", category=ToolCategory.NEWS, host="press.example"
+            name="fixture_news", category=ToolCategory.NEWS, host="apnews.com"
         )
     )
     registry.freeze()

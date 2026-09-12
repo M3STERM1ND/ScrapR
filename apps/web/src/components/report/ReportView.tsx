@@ -13,6 +13,12 @@ import type { Claim, Source, Version } from "@/lib/api/client";
  * "no claim without evidence" (`REQ-EVID-017`) is enforced in the pipeline, and
  * this is where a reader gets to check it — so citations are part of the claim,
  * not a footnote somewhere else.
+ *
+ * Phase 2 adds two more things a reader is entitled to see. **Confidence** sits
+ * beside every claim (`REQ-EVID-015 AC-1`), on three non-colour channels: the
+ * word, filled and hollow marks, and weight. **Source tier** sits beside every
+ * citation (`REQ-EVID-003 AC-2`), because a claim rated moderate should let the
+ * reader see *why* rather than asking them to trust the rating.
  */
 
 type Props = {
@@ -31,6 +37,34 @@ const CLAIM_WORD: Record<Claim["claim_type"], string> = {
   analysis: "Analysis",
   forecast: "Forecast",
   uncertainty: "Uncertain",
+};
+
+/* Filled and hollow marks, so the level survives greyscale and a screenshot.
+   Paired with the word below — never the marks alone. */
+const CONFIDENCE_MARK: Record<string, string> = {
+  high: "●●●",
+  moderate: "●●○",
+  low: "●○○",
+};
+
+const CONFIDENCE_WORD: Record<string, string> = {
+  high: "High confidence",
+  moderate: "Moderate confidence",
+  low: "Low confidence",
+};
+
+const CONFIDENCE_CLASS: Record<string, string> = {
+  high: "confidence-high",
+  moderate: "confidence-moderate",
+  low: "confidence-low",
+};
+
+/* `REQ-EVID-002`'s vocabulary, in words a non-technical reader can act on.
+   "Primary" alone means nothing to someone who has not read the PRD. */
+const TIER_WORD: Record<string, string> = {
+  primary: "Primary source",
+  secondary: "Established source",
+  lower: "Unverified source",
 };
 
 function formatDate(value: string): string {
@@ -95,7 +129,10 @@ export function ReportView({ version }: Props) {
 function ClaimBlock({ claim, sources }: { claim: Claim; sources: Source[] }) {
   return (
     <div className={`claim ${CLAIM_CLASS[claim.claim_type]}`}>
-      <p className="claim-label">{CLAIM_WORD[claim.claim_type]}</p>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="claim-label">{CLAIM_WORD[claim.claim_type]}</p>
+        <ConfidenceTag confidence={claim.confidence} />
+      </div>
       <p className="measure mt-2 text-body">{claim.text}</p>
 
       {sources.length > 0 ? (
@@ -108,6 +145,25 @@ function ClaimBlock({ claim, sources }: { claim: Claim; sources: Source[] }) {
         </ul>
       ) : null}
     </div>
+  );
+}
+
+/* `REQ-EVID-015 AC-1`: shown wherever the claim appears. Null is possible only
+   for a version written before Phase 2, so it renders nothing rather than
+   inventing a level for research that never had one assessed. */
+function ConfidenceTag({ confidence }: { confidence: string | null }) {
+  if (!confidence || !(confidence in CONFIDENCE_WORD)) return null;
+
+  return (
+    <span
+      className={`confidence-mark ${CONFIDENCE_CLASS[confidence]}`}
+      /* The marks are decorative; the word is the accessible name, so a screen
+         reader hears "Moderate confidence" rather than three bullet glyphs. */
+      aria-label={CONFIDENCE_WORD[confidence]}
+    >
+      <span aria-hidden="true">{CONFIDENCE_MARK[confidence]}</span>{" "}
+      {CONFIDENCE_WORD[confidence]}
+    </span>
   );
 }
 
@@ -131,6 +187,9 @@ function Citation({ source }: { source: Source }) {
       {/* Retrieval time is shown, not hidden: `REQ-EVID-004` makes it part of
           what a reader is entitled to see when judging a claim. */}
       <span className="tnum">Read {formatDate(source.retrieved_at)}</span>
+      {/* `REQ-EVID-003 AC-2`: the tier is visible, so a lower-tier source is
+          shown with its standing rather than quietly dropped (`AC-3`). */}
+      <span className="tier-tag">{TIER_WORD[source.authority_tier] ?? source.authority_tier}</span>
     </span>
   );
 }

@@ -148,15 +148,19 @@ def _fixture_for(category: ToolCategory) -> FixtureTool:
     look like a research failure rather than a missing credential — which is
     the exact confusion this fallback exists to prevent.
     """
-    host = f"{category.value.replace('_', '-')}.fixture.example"
+    # An allowlisted host, because `DEC-08` tiers on it: a fixture on an
+    # unlisted domain is `LOWER`, never resolves a question, and would make
+    # every keyless local run look like a research failure — the exact
+    # confusion this fallback exists to prevent.
+    host = "reuters.com"
     return FixtureTool(
         name=f"fixture_{category.value}",
         category=category,
         items=tuple(
             fixture_item(
-                source_name=f"{host} result {index + 1}",
+                source_name=f"{host} {category.value} result {index + 1}",
                 text=body,
-                source_url=f"https://{host}/{index + 1}",
+                source_url=f"https://{host}/{category.value}/{index + 1}",
             )
             for index, body in enumerate(
                 (

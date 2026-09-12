@@ -54,6 +54,7 @@ from scrapr_core.db.repositories.activity import ActivityRepository
 from scrapr_core.db.repositories.evidence import EvidenceRepository
 from scrapr_core.db.repositories.questions import QuestionRepository
 from scrapr_core.domain.json import JsonMapping
+from scrapr_core.evidence.tiering import registrable_host
 from scrapr_core.jobs.contract import StepContext, StepHandler, StepPermanentError
 from scrapr_core.llm.contract import LLMProvider
 from scrapr_core.orchestrator.budget import AreaReservation, RunBudget
@@ -80,6 +81,7 @@ from scrapr_core.orchestrator.synthesize import (
     synthesize,
     with_area_gaps,
 )
+from scrapr_core.orchestrator.trust import apply_trust
 from scrapr_core.synthesis.validation import validate_version
 from scrapr_core.tools.contract import ToolCategory, ToolFailure
 from scrapr_core.tools.registry import ToolRegistry
@@ -275,8 +277,14 @@ class ResearchHandler:
         cache: RetrievalCache,
     ) -> JsonMapping:
         activity = ActivityRepository(context.session)
-        evidence_repo = EvidenceRepository(context.session)
         research = _research_session(context)
+        evidence_repo = EvidenceRepository(
+            context.session,
+            # `DEC-08` rule 4: the subject's own site is primary. Resolved from
+            # what the user supplied, once, so a re-run cannot retier evidence
+            # written earlier under a different reading of the subject.
+            subject_hosts=_subject_hosts(research),
+        )
         version_id = context.run.version_id
 
         area_questions = questions.for_area(version_id, area_name)
@@ -491,6 +499,11 @@ class SynthesizeHandler:
         )
         _persist_report(context, with_area_gaps(result.sections, outcome.gaps))
 
+        # Stages 6, 8 and 9. Runs on the persisted claims, because conflict
+        # detection compares evidence rows and confidence reads the conflict
+        # state — neither can work on the in-memory draft.
+        apply_trust(context.session, version_id)
+
         report = validate_version(context.session, version_id)
         if not report.passed:
             # A gate failure is a generation defect and never ships
@@ -564,6 +577,17 @@ def _interpretation_from_checkpoint(
         interpretation_note=note if isinstance(note, str) else None,
         questions=[str(question) for question in raw_questions],
     )
+
+
+def _subject_hosts(research: ResearchSession) -> frozenset[str]:
+    """The research subject's own domains (`DEC-08` rule 4).
+
+    Only from a URL the user actually supplied. A subject *name* is not a
+    domain, and guessing `acme.com` from "Acme Corp" would hand `PRIMARY` tier
+    to whoever owns that domain — which may be nobody related to the subject.
+    """
+    host = registrable_host(research.context_url)
+    return frozenset({host}) if host else frozenset()
 
 
 def _categories_for(questions: Sequence[ResearchQuestion]) -> list[ToolCategory]:

@@ -182,10 +182,23 @@ not here.
 ### 9.3 Testing
 
 The adversarial cases are the specification: `$1.2bn` vs `$1,198m` (agree),
-2.0% vs 2.4% margin (conflict — 0.4 points, under a relative rule it would
-pass), 4,000 vs 4,150 headcount (agree), FY2024 vs FY2025 (not compared),
-estimate vs reported (not a conflict), and a value with no currency
-(`NON_COMPARABLE`).
+2.0% vs 2.8% margin (conflict — 0.8 points, over the absolute tolerance),
+2.0% vs 2.3% margin (agree — 0.3 points, within it), 4,000 vs 4,150 headcount
+(agree), FY2024 vs FY2025 (not compared), estimate vs reported (not a
+conflict), and a value with no currency (`NON_COMPARABLE`).
+
+**Corrected 2026-09-12.** This section first gave "2.0% vs 2.4% (conflict —
+0.4 points, under a relative rule it would pass)", which contradicts §3 twice
+over. 0.4 points is *within* the 0.5-point tolerance §3 sets, so it agrees; and
+the parenthetical has the argument backwards — a 1% relative rule on a 2% base
+is a 0.02-point tolerance, so a relative rule would flag it, not pass it.
+
+The error is worth leaving on the record because it is the exact confusion
+absolute tolerances exist to prevent. The reason ratios are measured in points
+is that a relative rule is far **too tight** on a small base: two sources
+reporting 2.00% and 2.03% — rounding — would be published as a disagreement.
+§2 had this right; the example did not. Caught by the test suite, which is
+where a specification that disagrees with itself should surface.
 
 ---
 

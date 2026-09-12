@@ -281,6 +281,46 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Confidence (`REQ-EVID-015 AC-1`, `REQ-EVID-003 AC-2`) ---- */
+
+/* Every claim carries a level, and it is shown where the claim appears. The
+   same non-colour rule the claim types follow applies here and matters more:
+   confidence is the signal a reader acts on, so it travels on three channels —
+   the word, the filled/hollow marks, and only then weight. Greyscale-safe by
+   construction, which is what `NFR-USE-002` asks for. */
+@utility confidence-mark {
+  font-size: var(--text-micro);
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+@utility confidence-high {
+  color: var(--color-ink);
+  font-weight: 500;
+}
+
+@utility confidence-moderate {
+  color: var(--color-ink-muted);
+}
+
+/* Deliberately not red. A low-confidence claim is a lead worth following, not
+   an error — `REQ-EVID-003` exists precisely so weak sources are shown rather
+   than hidden, and an alarm colour would undo that. */
+@utility confidence-low {
+  color: var(--color-ink-muted);
+  font-style: italic;
+}
+
+/* Source tier, beside the citation. `REQ-EVID-003 AC-2` requires a source's
+   tier and its effect on confidence be visible, so a reader can see why a
+   claim is rated the way it is rather than being asked to trust the rating. */
+@utility tier-tag {
+  font-size: var(--text-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-ink-muted);
+}
+
 /* ---- Activity ---- */
 
 @utility status-dot {

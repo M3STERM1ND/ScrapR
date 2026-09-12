@@ -82,3 +82,33 @@ test("a claim's type is not signalled by colour alone", async ({ page }) => {
   );
   expect(["Fact", "Analysis", "Forecast", "Uncertain"]).toContain(label);
 });
+
+test("a claim shows its confidence and its sources show their standing", async ({
+  page,
+}) => {
+  /**
+   * Phase 2's exit condition, from the reader's side: they can see where
+   * information came from and how much it is worth.
+   *
+   * `REQ-EVID-015 AC-1` requires confidence be displayed *where the claim
+   * appears*, and `REQ-EVID-003 AC-2` requires a source's tier be visible — so
+   * a reader can see why a claim is rated as it is instead of being asked to
+   * trust the rating. Both were computed in the pipeline before this test
+   * existed; neither reached a screen.
+   */
+  await page.goto("/research/new");
+
+  await fillObjective(page, OBJECTIVE);
+  await page.getByRole("button", { name: "Start research" }).click();
+
+  const claim = page.locator(".claim").first();
+  await expect(claim).toBeVisible({ timeout: 30_000 });
+
+  // The word, not the marks: the glyphs are aria-hidden decoration, so this
+  // asserts what a screen reader would actually announce.
+  await expect(claim.getByText(/(High|Moderate|Low) confidence/)).toBeVisible();
+
+  await expect(
+    claim.getByText(/(Primary|Established|Unverified) source/).first(),
+  ).toBeVisible();
+});

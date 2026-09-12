@@ -1,0 +1,505 @@
+"""Phase 2 through the real pipeline (`REQ-EVID-002`, `-006`, `-008`, `-015`).
+
+> **Exit (PRD):** the agent can explain where information came from and
+> identify disagreement.
+
+The unit tests next door prove each rule in isolation. What they cannot prove
+is that any of it reaches a reader — and that is exactly the failure mode this
+project has hit twice already: a correct module wired to nothing, and a code
+path that was dead in production while its unit test passed.
+
+So these assert against the **persisted rows** after a full run: the tier the
+source actually got, the confidence the claim actually carries, the rationale a
+reader could actually be shown.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator, Sequence
+from uuid import UUID
+
+import pytest
+from pipeline_support import (
+    fixture_registry,
+    run_pipeline,
+    scripted_provider,
+    search_tool,
+)
+from sqlalchemy import Engine, select, text
+from sqlalchemy.orm import Session, sessionmaker
+
+from scrapr_core.db.enums import AuthorityTier, ClaimType
+from scrapr_core.db.models import (
+    Base,
+    Claim,
+    Evidence,
+    Source,
+)
+from scrapr_core.db.repositories import (
+    AnonymousSessionRepository,
+    ResearchRepository,
+    RunRepository,
+)
+from scrapr_core.domain.ownership import OwnerContext
+from scrapr_core.llm import FakeLLMProvider
+from scrapr_core.orchestrator.extract import ExtractedEvidence, Extraction
+from scrapr_core.orchestrator.interpret import Interpretation
+from scrapr_core.orchestrator.pipeline import STAGES
+from scrapr_core.orchestrator.plan import _PlanDraft
+from scrapr_core.orchestrator.synthesize import DraftClaim, SynthesisDraft
+from scrapr_core.tools import ToolCategory, ToolRegistry
+
+pytestmark = pytest.mark.integration
+
+OBJECTIVE = "How is Acme Corp performing?"
+QUESTION = "What is Acme's revenue?"
+AREAS = (("Financial performance", (QUESTION,), ("web_search",)),)
+
+
+@pytest.fixture
+def session_factory(migrated_engine: Engine) -> sessionmaker[Session]:
+    return sessionmaker(bind=migrated_engine, expire_on_commit=False)
+
+
+@pytest.fixture(autouse=True)
+def _empty_afterwards(session_factory: sessionmaker[Session]) -> Iterator[None]:
+    yield
+    tables = ", ".join(sorted(Base.metadata.tables))
+    with session_factory() as session:
+        session.execute(text(f"TRUNCATE {tables} CASCADE"))
+        session.commit()
+
+
+def start_research(session_factory: sessionmaker[Session], url: str | None = None) -> UUID:
+    with session_factory() as session:
+        owner = OwnerContext.for_anonymous(
+            AnonymousSessionRepository(session).issue().session.id
+        )
+        research = ResearchRepository(session, owner)
+        created = research.create_session(objective=OBJECTIVE, context_url=url)
+        version = research.open_version(created.id)
+        assert version is not None
+        RunRepository(session).create_run(created.id, version.id, STAGES)
+        session.commit()
+        return created.id
+
+
+def provider() -> FakeLLMProvider:
+    return scripted_provider("Acme Corp", (QUESTION,), AREAS)
+
+
+# Two sources, same metric, same period, same currency, 58% apart.
+DISPUTED = (
+    "Acme Corp reported revenue of USD 1.2bn for fiscal 2025.",
+    "Acme Corp reported revenue of USD 1.9bn for fiscal 2025.",
+)
+
+
+def disputed_registry() -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register(search_tool(texts=DISPUTED, host="reuters.com"))
+    registry.freeze()
+    return registry
+
+
+def disputing_provider() -> FakeLLMProvider:
+    """A provider that extracts both figures rather than the suite's default.
+
+    `scripted_provider` carries a fixed standing extraction, so whatever a
+    fixture publishes, the evidence written is the same two sentences — and the
+    grounding check would drop anything else. Conflict detection compares the
+    numbers *in the evidence*, so testing it needs extraction that actually
+    reads the disputed figures.
+    """
+    provider = FakeLLMProvider(
+        standing_response=Extraction(
+            evidence=[
+                ExtractedEvidence(
+                    statement=DISPUTED[0],
+                    excerpt="revenue of USD 1.2bn",
+                    item_index=0,
+                ),
+                ExtractedEvidence(
+                    statement=DISPUTED[1],
+                    excerpt="revenue of USD 1.9bn",
+                    item_index=1,
+                ),
+            ]
+        )
+    )
+    provider.enqueue(
+        Interpretation(subject="Acme Corp", interpretation_note=None, questions=[QUESTION]),
+        _PlanDraft(
+            areas=[
+                _PlanDraft.Area(
+                    name="Financial performance",
+                    questions=[QUESTION],
+                    tool_categories=["web_search"],
+                )
+            ]
+        ),
+    )
+    return provider
+
+
+def _cite_everything(evidence_ids: Sequence[UUID]) -> SynthesisDraft:
+    """A report whose single fact cites every piece of evidence gathered.
+
+    Conflict detection compares the values *one claim* cites, so a draft citing
+    only the first — which the default does — can never surface a
+    disagreement no matter how badly two sources contradict each other. Making
+    that explicit here is the difference between testing the detector and
+    testing the fixture.
+    """
+    return SynthesisDraft(
+        summary=[
+            DraftClaim(
+                text="Acme reported revenue for FY2025.",
+                claim_type=ClaimType.FACT,
+                evidence_ids=[str(identifier) for identifier in evidence_ids],
+                is_important=True,
+            )
+        ],
+        sections=[],
+    )
+
+
+# --------------------------------------------------------------------------
+# Tiering reaches the rows
+# --------------------------------------------------------------------------
+
+
+async def test_sources_are_tiered_at_insert(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-002`. The fixtures publish on an allowlisted host, so they
+    land `SECONDARY` rather than the old blanket default."""
+    start_research(session_factory)
+
+    await run_pipeline(session_factory, fixture_registry(), provider())
+
+    with session_factory() as session:
+        sources = session.execute(select(Source)).scalars().all()
+
+    assert sources
+    assert all(source.authority_tier is AuthorityTier.SECONDARY for source in sources)
+
+
+async def test_every_source_records_why_it_got_its_tier(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`AC-3`: inspectable after the fact. A user asking "why is this
+    secondary" gets the rule that fired, not a score."""
+    start_research(session_factory)
+
+    await run_pipeline(session_factory, fixture_registry(), provider())
+
+    with session_factory() as session:
+        sources = session.execute(select(Source)).scalars().all()
+
+    for source in sources:
+        assert source.tier_rationale.get("rule")
+        assert source.tier_rationale.get("detail")
+
+
+async def test_an_unlisted_host_lands_lower(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`DEC-08 §4` in production, not in a unit test.
+
+    This is the behaviour change the phase introduces: a source nobody vouched
+    for no longer corroborates on its own.
+    """
+    registry = ToolRegistry()
+    registry.register(search_tool(host="some-unknown-blog.test"))
+    registry.freeze()
+    start_research(session_factory)
+
+    await run_pipeline(session_factory, registry, provider())
+
+    with session_factory() as session:
+        sources = session.execute(select(Source)).scalars().all()
+
+    assert sources
+    assert all(source.authority_tier is AuthorityTier.LOWER for source in sources)
+
+
+async def test_the_subjects_own_site_is_primary(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`DEC-08` rule 4, reached through the `context_url` the user supplied —
+    the only place a subject domain can honestly come from."""
+    registry = ToolRegistry()
+    registry.register(search_tool(host="acme-corp.test"))
+    registry.freeze()
+    start_research(session_factory, url="https://acme-corp.test/investors")
+
+    await run_pipeline(session_factory, registry, provider())
+
+    with session_factory() as session:
+        sources = session.execute(select(Source)).scalars().all()
+
+    assert sources
+    assert all(source.authority_tier is AuthorityTier.PRIMARY for source in sources)
+
+
+# --------------------------------------------------------------------------
+# Deduplication
+# --------------------------------------------------------------------------
+
+
+async def test_a_tracking_parameter_does_not_create_a_second_source(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-006 AC-1`, and the bug it was hiding.
+
+    `url_normalized` held the raw URL, so the unique constraint never fired and
+    one page behind two campaign tags counted as two sources — corroboration
+    invented out of a tracking parameter.
+    """
+    registry = ToolRegistry()
+    registry.register(
+        search_tool(
+            texts=("Acme reported revenue of $1.2bn.", "Acme reported revenue of $1.2bn."),
+            host="reuters.com",
+        )
+    )
+    registry.freeze()
+    start_research(session_factory)
+
+    await run_pipeline(session_factory, registry, provider())
+
+    with session_factory() as session:
+        urls = session.execute(select(Source.url_normalized)).scalars().all()
+
+    assert len(urls) == len(set(urls)), f"duplicate canonical urls: {urls}"
+
+
+# --------------------------------------------------------------------------
+# Normalization
+# --------------------------------------------------------------------------
+
+
+async def test_evidence_carries_a_normalized_value_and_its_reported_form(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-008 AC-1`, `AC-2`. Both, because the point of normalisation
+    is that it is non-destructive."""
+    start_research(session_factory)
+
+    await run_pipeline(session_factory, fixture_registry(), provider())
+
+    with session_factory() as session:
+        rows = session.execute(select(Evidence)).scalars().all()
+
+    priced = [row for row in rows if row.value_normalized is not None]
+    assert priced, "no evidence was normalised at all"
+    for row in priced:
+        assert row.value_raw, "the reported form was discarded"
+
+
+# --------------------------------------------------------------------------
+# Confidence — the exit condition
+# --------------------------------------------------------------------------
+
+
+async def test_every_claim_carries_a_confidence(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-015 AC-1`: every claim, no exempt type.
+
+    The column existed and was null for the whole of Phase 1. This is the
+    assertion that it is no longer.
+    """
+    start_research(session_factory)
+
+    await run_pipeline(session_factory, fixture_registry(), provider())
+
+    with session_factory() as session:
+        claims = session.execute(select(Claim)).scalars().all()
+
+    assert claims
+    for claim in claims:
+        assert claim.confidence in {"high", "moderate", "low"}, claim.text
+
+
+async def test_confidence_records_the_inputs_it_was_computed_from(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`AC-3` and `REQ-DATA-012`. The rationale is generated from the same
+    inputs as the level, so it cannot drift from what it explains."""
+    start_research(session_factory)
+
+    await run_pipeline(session_factory, fixture_registry(), provider())
+
+    with session_factory() as session:
+        claims = session.execute(select(Claim)).scalars().all()
+
+    for claim in claims:
+        inputs = claim.confidence_inputs
+        assert inputs.get("rationale")
+        assert inputs.get("level") == claim.confidence
+        assert "distinct_sources" in inputs
+
+
+async def test_an_uncertainty_is_low_and_a_sourced_fact_is_not(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`DEC-09 §4.3` through the real pipeline.
+
+    A run against a failing category produces both kinds of claim in one
+    report, which is what makes this a comparison rather than two assertions.
+    """
+    from scrapr_core.tools.impl import FailingFixtureTool
+
+    registry = ToolRegistry()
+    registry.register(search_tool())
+    registry.register(FailingFixtureTool(name="broken_news", category=ToolCategory.NEWS))
+    registry.freeze()
+    start_research(session_factory)
+
+    areas = (
+        ("Financial performance", (QUESTION,), ("web_search",)),
+        ("Recent news", ("What is new at Acme?",), ("news",)),
+    )
+    await run_pipeline(
+        session_factory,
+        registry,
+        scripted_provider("Acme Corp", (QUESTION, "What is new at Acme?"), areas),
+    )
+
+    with session_factory() as session:
+        claims = session.execute(select(Claim)).scalars().all()
+
+    uncertainties = [c for c in claims if c.claim_type is ClaimType.UNCERTAINTY]
+    facts = [c for c in claims if c.claim_type is ClaimType.FACT]
+
+    assert uncertainties, "the failed area produced no uncertainty"
+    assert all(c.confidence == "low" for c in uncertainties)
+    if facts:
+        assert all(c.confidence in {"high", "moderate"} for c in facts)
+
+
+# --------------------------------------------------------------------------
+# Conflict detection — the half fixtures cannot exercise by accident
+# --------------------------------------------------------------------------
+
+
+async def test_two_sources_that_disagree_produce_a_conflict(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-012 AC-1`, and the reason this test had to be written
+    deliberately.
+
+    Every other fixture in the suite agrees with itself, so conflict detection
+    was reachable in principle and never reached in practice — the same dead-
+    path shape as the skipped-category gap and the unplannable page-fetch
+    category. A provider that contradicts itself is the only way to prove the
+    code runs.
+    """
+    from scrapr_core.db.models import Conflict
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        disputed_registry(),
+        disputing_provider(),
+        synthesis=_cite_everything,
+    )
+
+    with session_factory() as session:
+        conflicts = session.execute(select(Conflict)).scalars().all()
+
+    assert conflicts, "two sources disagreed by 58% and nothing was detected"
+
+
+async def test_competing_evidence_is_preserved_not_discarded(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`AC-2`. Both sides stay on the record, which is what `AC-3` renders."""
+    from scrapr_core.db.models import Conflict, ConflictEvidence
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        disputed_registry(),
+        disputing_provider(),
+        synthesis=_cite_everything,
+    )
+
+    with session_factory() as session:
+        conflict = session.execute(select(Conflict)).scalars().first()
+        assert conflict is not None
+        sides = (
+            session.execute(
+                select(ConflictEvidence).where(
+                    ConflictEvidence.conflict_id == conflict.id
+                )
+            )
+            .scalars()
+            .all()
+        )
+        evidence = session.execute(select(Evidence)).scalars().all()
+
+    assert len(sides) == 2, "a conflict must keep both values"
+    assert len(evidence) >= 2, "competing evidence was discarded"
+
+
+async def test_an_unexplained_conflict_is_stored_as_unresolved(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-013 AC-3` and `REQ-EVID-014 AC-1`.
+
+    Two figures in the same currency, same period, neither stale — nothing in
+    the evidence explains the gap. An invented cause would be worse than none,
+    so the row says unresolved and carries no category.
+    """
+    from scrapr_core.db.enums import ConflictStatus
+    from scrapr_core.db.models import Conflict
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        disputed_registry(),
+        disputing_provider(),
+        synthesis=_cite_everything,
+    )
+
+    with session_factory() as session:
+        conflict = session.execute(select(Conflict)).scalars().first()
+
+    assert conflict is not None
+    assert conflict.status is ConflictStatus.UNRESOLVED
+    assert conflict.explanation_category is None
+
+
+async def test_a_contested_claim_is_not_high_confidence(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-014 AC-3`, end to end.
+
+    A fact two sources disagree about is not high-confidence however good those
+    sources are. The disagreement is the finding.
+    """
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        disputed_registry(),
+        disputing_provider(),
+        synthesis=_cite_everything,
+    )
+
+    with session_factory() as session:
+        facts = (
+            session.execute(select(Claim).where(Claim.claim_type == ClaimType.FACT))
+            .scalars()
+            .all()
+        )
+
+    contested = [claim for claim in facts if claim.confidence_inputs.get("conflicts")]
+    assert contested, "no claim ended up carrying the conflict"
+    assert all(claim.confidence == "low" for claim in contested)

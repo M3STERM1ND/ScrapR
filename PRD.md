@@ -2570,7 +2570,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
 | `OPEN-03` | Which queue/worker technology for background research and export jobs, **and where do those workers execute**? Vercel is the confirmed deployment platform (`DEC-03`) and its serverless execution limits may be exceeded by research runs and export generation. The answer must state how a run exceeding that limit satisfies `NFR-REL-001`. See §11.5. `websitedesign.md` says "Redis + workers"; that is shorthand, not a decision, and it says nothing about worker execution location. See implementation plan `N-05`. | Phase 1 | A |
-| `OPEN-04` | Which AI provider(s) and which model tiers for which stages? The abstraction is required (`REQ-TECH-006`); the default provider is not chosen. | Phase 1 | A |
+| ~~`OPEN-04`~~ | **Closed by `DEC-06`**, 2026-09-12. Anthropic, with `CHEAP`/`STANDARD`/`DEEP` mapped to Haiku 4.5 / Sonnet 5 / Opus 5 as configuration. See `docs/decisions/OPEN-04.md`. | — | — |
 | `OPEN-10` | Which object storage provider? `websitedesign.md` says "S3-compatible object storage", which names an API surface rather than a vendor and does **not** answer this. See implementation plan `N-05`. | Phase 1 | Both |
 | `OPEN-11` | Which authentication mechanism or provider? | Phase 5 | B |
 | `OPEN-12` | Does V1 actually need vector search, or is it deferrable? If needed, confirm a PostgreSQL extension suffices (`REQ-TECH-007`). | Phase 1 (decide), Phase 4 (deliver) | A |
@@ -2580,11 +2580,11 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
-| `OPEN-05` | Which web search provider? | Phase 1 | A |
-| `OPEN-06` | Which financial and stock data provider? | Phase 1 | A |
-| `OPEN-07` | Which source for regulatory filings? | Phase 1 | A |
-| `OPEN-08` | Which source for job postings and hiring data? | Phase 1 | A |
-| `OPEN-09` | Which news source? | Phase 1 | A |
+| ~~`OPEN-05`~~ | **Closed by `DEC-07`**, 2026-09-12. Tavily. See `docs/decisions/OPEN-05-09.md`. | — | — |
+| ~~`OPEN-06`~~ | **Closed by `DEC-07`**, 2026-09-12. Financial Modeling Prep. | — | — |
+| ~~`OPEN-07`~~ | **Closed by `DEC-07`**, 2026-09-12. SEC EDGAR. US registrants only; other jurisdictions produce a named gap. | — | — |
+| ~~`OPEN-08`~~ | **Closed by `DEC-07`**, 2026-09-12. Adzuna. | — | — |
+| ~~`OPEN-09`~~ | **Closed by `DEC-07`**, 2026-09-12. Tavily in news mode — the weakest row in that decision; `DEC-07 §7` records what would prompt a change. | — | — |
 
 ### 13.3 Research behaviour
 
@@ -2598,9 +2598,9 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
-| `OPEN-14` | What is the confidence scale? Discrete levels (for example High/Moderate/Low) or numeric? How is it computed from source tier, corroboration, conflict, and recency? The masterplan uses "High" and "Moderate" in examples but defines no scale. | Phase 2 | A |
-| `OPEN-15` | How is a source assigned an authority tier — domain allowlist, heuristic classification, model judgment, or a combination? Must be deterministic and inspectable (`REQ-EVID-002` AC-3). | Phase 2 | A |
-| `OPEN-16` | What numeric tolerance separates "the same value" from "a conflict"? A 0.4% difference in a revenue figure is probably rounding; a 12% difference is probably a real conflict. Needed per metric class. | Phase 2 | A |
+| ~~`OPEN-14`~~ | **Closed by `DEC-09`**, 2026-09-12. Three discrete levels — High/Moderate/Low — computed by a pure function of tier, corroboration, conflict and recency. See `docs/decisions/OPEN-14.md`. | — | — |
+| ~~`OPEN-15`~~ | **Closed by `DEC-08`**, 2026-09-12. A static, ordered rule table evaluated at insert, with the rule that fired recorded in `tier_rationale`. Default tier becomes `LOWER`. See `docs/decisions/OPEN-15.md`. | — | — |
+| ~~`OPEN-16`~~ | **Closed by `DEC-10`**, 2026-09-12. Per-metric-class tolerances in a version-controlled table; 1.0% relative default. See `docs/decisions/OPEN-16.md`. | — | — |
 | `OPEN-27` | What counts as a "meaningful difference" for the What's Changed summary? Without this, an update either reports noise or misses real change. | Phase 6 | A |
 
 ### 13.5 Anonymous access and accounts

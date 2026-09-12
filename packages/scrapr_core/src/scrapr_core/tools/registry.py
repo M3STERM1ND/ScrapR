@@ -18,6 +18,7 @@ import asyncio
 from collections.abc import Sequence
 
 from scrapr_core.tools.contract import (
+    TARGETED_CATEGORIES,
     Tool,
     ToolCategory,
     ToolFailure,
@@ -83,12 +84,26 @@ class ToolRegistry:
         return tuple(self._by_category.get(category, ()))
 
     def categories(self) -> Sequence[ToolCategory]:
-        """Which categories have at least one tool.
+        """Which categories have at least one tool."""
+        return tuple(sorted(self._by_category))
+
+    def plannable_categories(self) -> Sequence[ToolCategory]:
+        """Which categories an area may be planned against.
 
         This is what the planning stage consults: an area is only planned
-        against retrieval that actually exists.
+        against retrieval that actually exists **and can answer a query**.
+
+        `TARGETED_CATEGORIES` are excluded because they answer a specific URL
+        or upload rather than a question. Planning an area against one produces
+        `not_found` for every question in it, and the run then reports an area
+        that "could not be researched" when the truth is that it was asked the
+        wrong kind of question.
         """
-        return tuple(sorted(self._by_category))
+        return tuple(
+            category
+            for category in sorted(self._by_category)
+            if category not in TARGETED_CATEGORIES
+        )
 
     # ------------------------------------------------------------------
     # Dispatch

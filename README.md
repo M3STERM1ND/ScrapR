@@ -2,14 +2,18 @@
 
 Turns a question into an evidence-backed report with sources, analysis, charts and follow-up.
 
-**Status: Phase 0 complete.** The walking skeleton runs end to end in a browser.
+**Status: Phase 1 complete.** One query becomes a source-backed report.
+
 Ask a question at `/research/new`, watch the activity timeline fill in as the
-worker executes the steps, and read the report that comes back with a citation
-and a retrieval date on the claim. Every seam in the architecture is crossed
-once: the tool contract, the model provider, the trust boundary, ownership, the
-durable job state machine, the validation gate, the HTTP surface and the
-generated client. Phase 1 replaces the two-stage skeleton with the real
-research pipeline, one stage at a time, against the same fixtures. See
+worker executes the steps, and read the report that comes back with citations
+and retrieval dates. The pipeline interprets the objective, plans research
+areas, retrieves against real providers, extracts evidence with verbatim
+excerpts checked against their source, decides sufficiency by question
+coverage, and writes a validated report that states what it could not
+establish.
+
+Phase 2 (Evidence & Trust) is unblocked: `DEC-08`, `DEC-09` and `DEC-10` close
+the three questions that gated it. See
 `docs/superpowers/specs/implementation-plan.md` §13 for the phase plan and
 `docs/decisions/` for resolved open questions.
 
@@ -29,10 +33,10 @@ packages/scrapr_core/ all Python domain logic
   domain/             ids (UUIDv7), ownership, json types
   db/                 models, migrations, ownership-scoped repositories
   security/           the trusted/untrusted boundary
-  tools/              uniform tool contract, registry, fixture tools
-  llm/                provider abstraction, envelopes, the fake provider
+  tools/              uniform tool contract, registry, six real tools plus fixtures
+  llm/                provider abstraction, envelopes, Anthropic and the fakes
   jobs/               the durable step runner
-  orchestrator/       Phase 0 skeleton; the real pipeline is Phase 1
+  orchestrator/       the four-step research pipeline
   synthesis/          the validation gate
 packages/contracts/   openapi.json, generated from the API
 docs/                 specs and decision records

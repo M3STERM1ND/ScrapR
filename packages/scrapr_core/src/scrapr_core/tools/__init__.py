@@ -9,6 +9,7 @@ runtime surprise.
 from __future__ import annotations
 
 from scrapr_core.tools.contract import (
+    TARGETED_CATEGORIES,
     FailureKind,
     Tool,
     ToolBudget,
@@ -26,6 +27,7 @@ from scrapr_core.tools.registry import (
 )
 
 __all__ = [
+    "TARGETED_CATEGORIES",
     "FailureKind",
     "RegistryFrozenError",
     "Tool",

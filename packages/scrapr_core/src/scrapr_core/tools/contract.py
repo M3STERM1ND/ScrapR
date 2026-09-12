@@ -67,6 +67,26 @@ class ToolCategory(StrEnum):
     DOCUMENTS = "documents"
 
 
+TARGETED_CATEGORIES: frozenset[ToolCategory] = frozenset(
+    {ToolCategory.PAGE_FETCH, ToolCategory.DOCUMENTS}
+)
+"""Categories that answer a **specific target**, not a query.
+
+Page fetch reads one URL; the documents tool reads one upload. Neither can do
+anything with "tell me about Acme Corp", so neither may be chosen by the
+planning stage — an area planned against one would produce `not_found` for
+every question and report itself as unresearchable.
+
+This is a real bug that shipped: registering page fetch in the worker made it
+selectable, the planner picked it, and a whole run came back with no evidence
+and an area it said "could not be researched". The tool was working exactly as
+specified; it was being asked the wrong kind of question.
+
+They are still registered and still invoked — by a caller that already has a
+URL, which is how `REQ-TOOL-003` is meant to be reached.
+"""
+
+
 type FailureKind = Literal[
     "timeout", "error", "paywalled", "blocked", "not_found", "rate_limited"
 ]

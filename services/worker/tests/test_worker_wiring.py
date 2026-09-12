@@ -41,12 +41,15 @@ ALL_KEYS = {
 def settings(**overrides: object) -> Settings:
     """Settings with nothing inherited from the developer's own environment.
 
-    Every provider field is cleared first. A test that passed only because the
-    machine running it happened to have a key exported would be worse than no
-    test at all.
+    Every provider field is cleared first, and the environment defaults to
+    production. A test that passed only because the machine running it happened
+    to have a key exported would be worse than no test at all — and one that
+    passed only because a local fixture filled the gap would be worse still.
     """
     blank = {name: "" for name in ALL_KEYS}
-    return Settings().model_copy(update={**blank, **overrides})
+    return Settings().model_copy(
+        update={**blank, "scrapr_env": "production", **overrides}
+    )
 
 
 # --------------------------------------------------------------------------
@@ -113,7 +116,51 @@ def test_a_missing_key_removes_its_category_and_says_so(
 
     assert not registry.for_category(category)
     assert category in report.missing
-    assert category.value.replace("_", " ") in report.summary.replace("_", " ")
+    assert category.value in report.summary
+
+
+def test_production_never_falls_back_to_a_fixture() -> None:
+    """The tool-layer counterpart of the scripted-provider guard.
+
+    Serving canned items as retrieval would be research nobody did, which is
+    the one thing the whole stand-in design exists to keep out of production.
+    """
+    registry, report = build_registry(settings(scrapr_env="production"))
+
+    assert report.stubbed == ()
+    assert not any(
+        isinstance(tool, FixtureTool)
+        for category in registry.categories()
+        for tool in registry.for_category(category)
+    )
+
+
+def test_a_keyless_local_run_still_has_retrieval() -> None:
+    """A developer without keys must be able to run the pipeline.
+
+    Before this fallback existed, a keyless local run registered page fetch
+    alone, found nothing, and closed the version as failed — which reads as a
+    research defect rather than an absent credential.
+    """
+    registry, report = build_registry(settings(scrapr_env="local"))
+
+    assert report.stubbed, "nothing stood in for the unserved categories"
+    assert registry.for_category(ToolCategory.WEB_SEARCH)
+    # And it says plainly what it is, because a local run that looks like
+    # research is exactly what a stand-in must not be mistaken for.
+    assert "not real research" in report.summary
+
+
+def test_a_configured_category_is_not_stubbed_over_locally() -> None:
+    """A real key wins. Otherwise a developer with one provider configured
+    would be testing against a fixture without knowing it."""
+    registry, report = build_registry(
+        settings(scrapr_env="local", tavily_api_key="tv-test")
+    )
+
+    assert ToolCategory.WEB_SEARCH not in report.stubbed
+    names = [tool.name for tool in registry.for_category(ToolCategory.WEB_SEARCH)]
+    assert names == ["tavily_search"]
 
 
 def test_one_absent_tavily_key_removes_both_of_its_categories() -> None:
@@ -192,7 +239,7 @@ def test_a_key_satisfies_production_too() -> None:
 def test_every_stage_has_a_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     """A stage with no handler is poisoned on its first attempt, so a wiring
     gap here would fail every run at exactly the step it reached."""
-    monkeypatch.setattr(worker, "get_settings", lambda: settings())
+    monkeypatch.setattr(worker, "get_settings", lambda: settings(scrapr_env="local"))
 
     runner = build_runner("test-worker")
 

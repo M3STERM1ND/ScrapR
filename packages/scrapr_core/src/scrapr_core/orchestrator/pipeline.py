@@ -197,7 +197,12 @@ class PlanHandler:
 
         interpretation = _interpretation_from_checkpoint(context, research)
         plan = await plan_research(
-            interpretation, self.registry.categories(), self.provider
+            # Plannable, not all: page fetch answers a URL rather than a
+            # question, and an area planned against it reports itself
+            # unresearchable for every question in it.
+            interpretation,
+            self.registry.plannable_categories(),
+            self.provider,
         )
 
         questions.persist_plan(

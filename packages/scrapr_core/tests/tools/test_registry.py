@@ -233,3 +233,40 @@ async def test_a_slow_tool_is_cut_off_at_its_budget() -> None:
 
     assert isinstance(outcome, ToolFailure)
     assert outcome.kind == "timeout"
+
+
+# --------------------------------------------------------------------------
+# What may be planned against
+# --------------------------------------------------------------------------
+
+
+def test_page_fetch_is_registered_but_never_planned_against() -> None:
+    """A bug that shipped, kept as a test.
+
+    Registering page fetch in the worker made it selectable by the planner. It
+    answers a URL, not a question, so every retrieval returned `not_found` and
+    the run reported an area that "could not be researched" — when the truth
+    was that the area had been asked the wrong kind of question. The tool was
+    behaving exactly as specified the whole time.
+    """
+    registry = ToolRegistry()
+    registry.register(FixtureTool(name="pf", category=ToolCategory.PAGE_FETCH, items=()))
+    registry.register(FixtureTool(name="ws", category=ToolCategory.WEB_SEARCH, items=()))
+    registry.freeze()
+
+    assert ToolCategory.PAGE_FETCH in registry.categories()
+    assert ToolCategory.PAGE_FETCH not in registry.plannable_categories()
+    assert ToolCategory.WEB_SEARCH in registry.plannable_categories()
+    # Still reachable by a caller that has a URL, which is how `REQ-TOOL-003`
+    # is meant to be invoked.
+    assert registry.for_category(ToolCategory.PAGE_FETCH)
+
+
+def test_documents_are_targeted_too() -> None:
+    """Phase 4's upload tool reads one document. Same shape, same exclusion,
+    recorded now so it is not rediscovered then."""
+    registry = ToolRegistry()
+    registry.register(FixtureTool(name="doc", category=ToolCategory.DOCUMENTS, items=()))
+    registry.freeze()
+
+    assert registry.plannable_categories() == ()

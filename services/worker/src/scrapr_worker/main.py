@@ -33,7 +33,7 @@ from scrapr_core.jobs import JobRunner
 from scrapr_core.llm.scripted import ScriptedProvider
 from scrapr_core.orchestrator.pipeline import build_handlers
 from scrapr_core.tools import ToolCategory, ToolRegistry
-from scrapr_core.tools.impl import FixtureTool, fixture_item
+from scrapr_core.tools.impl import FixtureTool, PageFetchTool, fixture_item
 
 __all__ = ["build_registry", "build_runner", "main"]
 
@@ -51,11 +51,20 @@ resolved. A second of latency on a job that takes minutes is not the bottleneck.
 def build_registry() -> ToolRegistry:
     """Register the tools this process may use, then close the registry.
 
-    Two categories with two sources each, because `MIN_SOURCES_PER_QUESTION` is
-    two: a one-source fixture set would leave every question open and make every
-    local run look like a research failure rather than a missing provider.
+    Two fixture categories with two sources each, because
+    `MIN_SOURCES_PER_QUESTION` is two: a one-source fixture set would leave
+    every question open and make every local run look like a research failure
+    rather than a missing provider.
+
+    **Page fetch is real** (`REQ-TOOL-003`). It is the only one of Task 1.9's
+    six tools that needed no provider decision — `OPEN-05..09` each name a
+    vendor nobody has chosen, and a URL names nobody — so it registers here
+    beside the fixtures rather than waiting with them. That it can do so
+    without the orchestrator learning anything is `REQ-TOOL-009 AC-2` holding
+    up: the loop still asks for a category.
     """
     registry = ToolRegistry()
+    registry.register(PageFetchTool())
 
     for name, category, host, bodies in (
         (

@@ -33,14 +33,35 @@ def test_the_registry_is_frozen_before_any_run() -> None:
 def test_the_fixtures_can_actually_resolve_a_question() -> None:
     """`MIN_SOURCES_PER_QUESTION` is two, so a single-source fixture set would
     make every local run look like a research failure rather than a missing
-    provider."""
+    provider.
+
+    Scoped to the fixtures on purpose. A real tool returns what the web gave
+    it, so this bar is one only a *stand-in* can be held to — page fetch
+    retrieves the single page it was asked for and is right to.
+    """
+    registry = build_registry()
+    fixtures = [
+        tool
+        for category in registry.categories()
+        for tool in registry.for_category(category)
+        if isinstance(tool, FixtureTool)
+    ]
+
+    assert fixtures, "the local run has no fixture retrieval left at all"
+    for fixture in fixtures:
+        assert len(fixture.items) >= 2
+
+
+def test_page_fetch_is_registered_as_a_real_tool() -> None:
+    """`REQ-TOOL-003`, Task 1.9. The category has a provider rather than a
+    stand-in, which is what stops a planned page fetch returning `not_found`.
+    """
     registry = build_registry()
 
-    for category in registry.categories():
-        tools = registry.for_category(category)
-        assert tools
-        for tool in tools:
-            assert len(tool.items) >= 2  # type: ignore[attr-defined]
+    tools = registry.for_category(ToolCategory.PAGE_FETCH)
+
+    assert tools, "page fetch has no provider registered"
+    assert not any(isinstance(tool, FixtureTool) for tool in tools)
 
 
 def test_every_stage_has_a_handler() -> None:

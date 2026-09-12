@@ -9,6 +9,10 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
+    # Page fetch (`REQ-TOOL-003`) is the one tool that opens a connection
+    # itself rather than through a vendor SDK, so the HTTP client is a
+    # runtime dependency of the core rather than a test one.
+    "httpx>=0.28",
 ]
 
 [build-system]

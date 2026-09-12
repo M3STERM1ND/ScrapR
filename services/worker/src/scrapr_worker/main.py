@@ -7,16 +7,14 @@ wait when there is nothing to do.
 **Tool availability is fixed here, at startup, and then frozen**
 (`REQ-SEC-015 AC-1`). Retrieved content cannot add, name or reach a tool,
 because by the time any content has been retrieved the registry no longer
-accepts registrations.
+accepts registrations. The registry itself is built by
+`scrapr_core.tools.builder` from configuration, so which providers exist is an
+environment question rather than a code one.
 
-Fixtures and a fake provider, because `OPEN-04..09` name no providers yet. Each
-real one lands as a registration next to the fixture it replaces, and no other
-file changes.
-
-Until `OPEN-04` closes, the model is a deterministic stand-in that rearranges
-what retrieval found rather than writing anything of its own, and refuses to run
-in production at all. That is what implementation plan §15 means by exercising
-the pipeline "over fixtures plus the fake LLM".
+**Which model answers is `DEC-06`; which providers answer is `DEC-07`.** Both
+are configuration. What is not configurable is the choice between a real model
+and the stand-in: a worker with no key refuses to start rather than quietly
+serving deterministic echo as research (§`build_runner`).
 """
 
 from __future__ import annotations
@@ -25,17 +23,19 @@ import asyncio
 import logging
 import signal
 import sys
+from dataclasses import replace
 from types import FrameType
 
-from scrapr_core.config import get_settings
+from scrapr_core.config import Settings, get_settings
 from scrapr_core.db.engine import build_engine, build_session_factory
 from scrapr_core.jobs import JobRunner
+from scrapr_core.llm.anthropic_provider import DEFAULT_PROFILES, AnthropicProvider
+from scrapr_core.llm.contract import LLMProvider, ModelTier
 from scrapr_core.llm.scripted import ScriptedProvider
 from scrapr_core.orchestrator.pipeline import build_handlers
-from scrapr_core.tools import ToolCategory, ToolRegistry
-from scrapr_core.tools.impl import FixtureTool, PageFetchTool, fixture_item
+from scrapr_core.tools.builder import build_registry
 
-__all__ = ["build_registry", "build_runner", "main"]
+__all__ = ["build_provider", "build_registry", "build_runner", "main"]
 
 logger = logging.getLogger("scrapr.worker")
 
@@ -48,85 +48,64 @@ resolved. A second of latency on a job that takes minutes is not the bottleneck.
 """
 
 
-def build_registry() -> ToolRegistry:
-    """Register the tools this process may use, then close the registry.
+def build_provider(settings: Settings) -> LLMProvider:
+    """The model behind every stage.
 
-    Two fixture categories with two sources each, because
-    `MIN_SOURCES_PER_QUESTION` is two: a one-source fixture set would leave
-    every question open and make every local run look like a research failure
-    rather than a missing provider.
+    Three outcomes, and the middle one is the point:
 
-    **Page fetch is real** (`REQ-TOOL-003`). It is the only one of Task 1.9's
-    six tools that needed no provider decision — `OPEN-05..09` each name a
-    vendor nobody has chosen, and a URL names nobody — so it registers here
-    beside the fixtures rather than waiting with them. That it can do so
-    without the orchestrator learning anything is `REQ-TOOL-009 AC-2` holding
-    up: the loop still asks for a category.
+    * a key, anywhere — the real provider, with the `DEC-06` tier table
+      overridden by whatever configuration says;
+    * no key, in production — **refuse to start**;
+    * no key, locally — the deterministic stand-in, which rearranges retrieved
+      text rather than writing anything.
+
+    The refusal is what stops the convenient path from becoming the shipped
+    path. A stand-in that invented plausible findings would make a broken
+    pipeline look like a working product, and the only reliable guard against
+    shipping it is that it cannot run where users are.
     """
-    registry = ToolRegistry()
-    registry.register(PageFetchTool())
-
-    for name, category, host, bodies in (
-        (
-            "fixture_search",
-            ToolCategory.WEB_SEARCH,
-            "example.com",
-            (
-                "The company reported $1.2bn revenue for FY2025, up 18% year "
-                "over year.",
-                "Gross margin held at 75% through the year.",
-            ),
-        ),
-        (
-            "fixture_news",
-            ToolCategory.NEWS,
-            "press.example",
-            (
-                "The company reported $1.2bn in annual revenue, according to "
-                "its latest filing.",
-                "Hiring continued through the fourth quarter, with 40 open "
-                "engineering roles listed.",
-            ),
-        ),
-    ):
-        registry.register(
-            FixtureTool(
-                name=name,
-                category=category,
-                items=tuple(
-                    fixture_item(
-                        source_name=f"{host} result {index + 1}",
-                        text=body,
-                        source_url=f"https://{host}/{name}/{index + 1}",
-                    )
-                    for index, body in enumerate(bodies)
-                ),
-            )
+    if settings.has_ai_provider:
+        # Only the model name is configurable. `max_tokens`, thinking and
+        # effort stay as `DEC-06` set them, because those are facts about what
+        # each model accepts rather than preferences — Haiku rejects `effort`
+        # whoever names it in an environment variable.
+        return AnthropicProvider(
+            profiles={
+                tier: replace(DEFAULT_PROFILES[tier], model=model)
+                for tier, model in (
+                    (ModelTier.CHEAP, settings.model_cheap),
+                    (ModelTier.STANDARD, settings.model_standard),
+                    (ModelTier.DEEP, settings.model_deep),
+                )
+            }
         )
 
-    registry.freeze()
-    return registry
+    if settings.scrapr_env == "production":
+        raise RuntimeError(
+            "no AI provider is configured (ANTHROPIC_API_KEY is unset), and the "
+            "scripted stand-in must never run in production"
+        )
+
+    logger.warning(
+        "no ANTHROPIC_API_KEY: running the deterministic stand-in, which "
+        "rearranges retrieved text and writes no research of its own"
+    )
+    return ScriptedProvider()
 
 
 def build_runner(worker_id: str) -> JobRunner:
-    """Wire the runner to the pipeline's stage handlers.
-
-    One line changes when `OPEN-04` closes: the provider. Everything else here
-    is already what production runs, because the stages read their inputs from
-    the database rather than from whatever assembled them.
-    """
+    """Wire the runner to the pipeline's stage handlers."""
     settings = get_settings()
-    if settings.scrapr_env == "production":
-        # A deterministic echo is a development convenience. Serving it to users
-        # would mean presenting research nobody did.
-        raise RuntimeError(
-            "no AI provider is configured (OPEN-04), and the scripted stand-in "
-            "must never run in production"
-        )
+    provider = build_provider(settings)
+    registry, report = build_registry(settings)
+
+    # Said once, at start, rather than discovered per run. An operator needs to
+    # know a category is unserved before the reports start naming it as a gap.
+    logger.info("provider: %s; %s", provider.name, report.summary)
 
     return JobRunner(
         build_session_factory(build_engine()),
-        build_handlers(ScriptedProvider(), build_registry()),
+        build_handlers(provider, registry),
         worker_id=worker_id,
     )
 

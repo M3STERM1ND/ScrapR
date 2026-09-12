@@ -7,6 +7,11 @@ material meet, and the signature is what keeps them apart.
 
 from __future__ import annotations
 
+from scrapr_core.llm.anthropic_provider import (
+    AnthropicProvider,
+    ProviderRefusal,
+    TierProfile,
+)
 from scrapr_core.llm.contract import (
     LLMProvider,
     ModelTier,
@@ -19,12 +24,15 @@ from scrapr_core.llm.fake import FakeLLMProvider, NoCannedResponseError, Recorde
 
 __all__ = [
     "MATERIAL_PREAMBLE",
+    "AnthropicProvider",
     "FakeLLMProvider",
     "LLMProvider",
     "ModelTier",
     "NoCannedResponseError",
+    "ProviderRefusal",
     "RecordedCall",
     "StructuredResult",
+    "TierProfile",
     "TokenUsage",
     "UntrustedDocument",
     "render_untrusted",

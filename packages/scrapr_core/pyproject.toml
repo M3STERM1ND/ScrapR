@@ -13,6 +13,10 @@ dependencies = [
     # itself rather than through a vendor SDK, so the HTTP client is a
     # runtime dependency of the core rather than a test one.
     "httpx>=0.28",
+    # `DEC-06`: Anthropic is the AI provider. The SDK, not raw HTTP —
+    # structured output and the thinking parameters differ per model and
+    # the SDK is what tracks them.
+    "anthropic>=0.40",
 ]
 
 [build-system]

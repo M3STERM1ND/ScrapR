@@ -33,6 +33,8 @@ from scrapr_core.db.models import (
     Claim,
     ClaimEvidence,
     Evidence,
+    QuestionState,
+    ResearchQuestion,
     ResearchSession,
     ResearchVersion,
     Source,
@@ -286,3 +288,93 @@ def test_the_gate_ignores_other_versions(db_session: Session, version_id: UUID) 
     db_session.flush()
 
     assert validate_version(db_session, other.id).passed
+
+
+# --------------------------------------------------------------------------
+# Unanswered questions must be stated (`REQ-SYNTH-010`, `DEC-04 §6.3`)
+# --------------------------------------------------------------------------
+
+
+def add_question(
+    db_session: Session,
+    version_id: UUID,
+    text: str,
+    state: QuestionState = QuestionState.OPEN,
+) -> ResearchQuestion:
+    question = ResearchQuestion(
+        version_id=version_id,
+        area_name="Financials",
+        text=text,
+        ordering=new_id().int % 1000,
+        resolution_state=state,
+        tool_categories=["web_search"],
+    )
+    db_session.add(question)
+    db_session.flush()
+    return question
+
+
+def test_an_unanswered_question_stated_as_an_uncertainty_passes(
+    db_session: Session, version_id: UUID
+) -> None:
+    add_question(db_session, version_id, "What is segment revenue?")
+    add_claim(
+        db_session,
+        version_id,
+        ClaimType.UNCERTAINTY,
+    ).text = "The evidence does not answer this: What is segment revenue?"
+    db_session.flush()
+
+    assert validate_version(db_session, version_id).passed
+
+
+def test_an_unanswered_question_nobody_mentioned_is_rejected(
+    db_session: Session, version_id: UUID
+) -> None:
+    """The rule that stops a thin run reading like a complete one. A report that
+    omits the gap is claiming coverage it does not have."""
+    evidence = add_evidence(db_session, version_id)
+    add_claim(db_session, version_id, ClaimType.FACT, evidence=evidence)
+    add_question(db_session, version_id, "What is segment revenue?")
+
+    report = validate_version(db_session, version_id)
+
+    assert not report.passed
+    assert report.violations[0].rule == "REQ-SYNTH-010"
+    assert "segment revenue" in report.violations[0].detail
+
+
+def test_an_unanswerable_question_must_also_be_stated(
+    db_session: Session, version_id: UUID
+) -> None:
+    """Unanswerable is terminal and honest, not quiet: it becomes an
+    uncertainty claim exactly as a ceiling-terminated question does."""
+    add_question(
+        db_session, version_id, "What is pricing?", QuestionState.UNANSWERABLE
+    )
+
+    report = validate_version(db_session, version_id)
+
+    assert not report.passed
+    assert report.violations[0].rule == "REQ-SYNTH-010"
+
+
+def test_a_resolved_question_needs_no_uncertainty(
+    db_session: Session, version_id: UUID
+) -> None:
+    evidence = add_evidence(db_session, version_id)
+    add_claim(db_session, version_id, ClaimType.FACT, evidence=evidence)
+    add_question(db_session, version_id, "What is revenue?", QuestionState.RESOLVED)
+
+    assert validate_version(db_session, version_id).passed
+
+
+def test_each_missing_gap_is_reported_separately(
+    db_session: Session, version_id: UUID
+) -> None:
+    add_question(db_session, version_id, "What is segment revenue?")
+    add_question(db_session, version_id, "What is pricing?")
+
+    report = validate_version(db_session, version_id)
+
+    assert len(report.violations) == 2

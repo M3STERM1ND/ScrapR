@@ -78,7 +78,7 @@ warn_unreachable = true
 warn_unused_ignores = true
 show_error_codes = true
 files = ["packages", "services"]
-mypy_path = "packages/scrapr_core/src:services/api/src:services/worker/src"
+mypy_path = "packages/scrapr_core/src:services/api/src:services/worker/src:testing"
 explicit_package_bases = true
 namespace_packages = true
 

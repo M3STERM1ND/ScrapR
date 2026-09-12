@@ -312,7 +312,6 @@ class JobRunner:
         stopped because it ran out of work to do, which is what `sufficiency`
         means here.
         """
-        run.status = status
         if reason is not None:
             run.termination_reason = reason
         elif run.termination_reason is None:
@@ -320,24 +319,50 @@ class JobRunner:
         run.finished_at = utcnow()
 
         version = session.get(ResearchVersion, run.version_id)
-        if version is not None and version.closed_at is None:
+        version_status = self._close_version(version, status)
+
+        # `partial` outranks the runner's view. A handler that judged the
+        # research incomplete (`REQ-AGENT-009`) knows something the step machine
+        # does not: every step ran, and the result is still short. Letting the
+        # runner overwrite that with `complete` would be the system telling the
+        # user it covered ground it never reached.
+        run.status = (
+            RunStatus.PARTIAL
+            if version_status is VersionStatus.PARTIAL and status is RunStatus.COMPLETE
+            else status
+        )
+
+        # The session status is what the workspace header shows, so it has to
+        # end where the version ended. A failed run under a session still
+        # reading "researching" is the exact shape of `REQ-AGENT-009 AC-3`.
+        research = session.get(ResearchSession, run.session_id)
+        if research is not None:
+            research.status = _SESSION_STATUS[run.status]
+            research.updated_at = utcnow()
+
+        session.flush()
+
+    @staticmethod
+    def _close_version(
+        version: ResearchVersion | None, status: RunStatus
+    ) -> VersionStatus | None:
+        """Close the version, keeping any outcome a handler already recorded.
+
+        A handler that wrote `partial` did so knowing what the research actually
+        covered. The runner only decides the status of a version still marked
+        `building`, which is the case where nothing else has an opinion.
+        """
+        if version is None or version.closed_at is not None:
+            return version.status if version is not None else None
+
+        if version.status is VersionStatus.BUILDING:
             version.status = (
                 VersionStatus.COMPLETE
                 if status is RunStatus.COMPLETE
                 else VersionStatus.FAILED
             )
-            version.closed_at = utcnow()
-
-        # The session status is what the workspace header shows, so it has to
-        # end where the run ended. A run that failed and a session still reading
-        # "researching" is the exact shape of `REQ-AGENT-009 AC-3`: a result
-        # presented as something it is not.
-        research = session.get(ResearchSession, run.session_id)
-        if research is not None:
-            research.status = _SESSION_STATUS[status]
-            research.updated_at = utcnow()
-
-        session.flush()
+        version.closed_at = utcnow()
+        return version.status
 
     def _owner_of(self, session: Session, run: ResearchRun) -> OwnerContext:
         """Rebuild the owning context so handlers use scoped repositories too.

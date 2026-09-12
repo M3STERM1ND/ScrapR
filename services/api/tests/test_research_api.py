@@ -1,10 +1,10 @@
-"""The HTTP surface of the Phase 0 exit condition.
+"""The HTTP surface over the research pipeline.
 
 `POST /v1/research` writes a session, a version and a run; the runner executes
-them; `GET /v1/research/{id}/versions/1` returns the report and
-`GET .../activity` returns the two stages. Everything below the HTTP layer is
-real — real repositories, real database, real runner — because the seams are
-what Phase 0 exists to prove.
+the stages; `GET /v1/research/{id}/versions/1` returns the report and
+`GET .../activity` returns the timeline. Everything below the HTTP layer is real
+— real repositories, real database, real runner, real stages — because a test
+that mocks the layer underneath only proves the mock.
 
 The other half of this file is the boundary's own rules: ownership resolved from
 a cookie, another owner's research reading as absent, and errors that say
@@ -16,65 +16,31 @@ from __future__ import annotations
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pipeline_support import fixture_registry, run_pipeline, scripted_provider
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from scrapr_api import deps
 from scrapr_api.deps import ANONYMOUS_COOKIE
 from scrapr_core.db.repositories import ResearchRepository
-from scrapr_core.jobs import JobRunner
 from scrapr_core.llm import FakeLLMProvider
-from scrapr_core.orchestrator.skeleton import (
-    RETRIEVE_STAGE,
-    SYNTHESIZE_STAGE,
-    RetrieveHandler,
-    SkeletonClaim,
-    SynthesizeHandler,
-)
-from scrapr_core.tools import ToolCategory, ToolRegistry
-from scrapr_core.tools.impl import FixtureTool, fixture_item
+from scrapr_core.tools import ToolRegistry
 
 pytestmark = pytest.mark.integration
 
 OBJECTIVE = "How is Acme Corp positioned against its competitors?"
-RETRIEVED_TEXT = "Acme reported $1.2bn revenue for FY2025, up 18% year over year."
+QUESTION = "What is Acme's revenue?"
+AREAS = (("Financial performance", (QUESTION,), ("web_search",)),)
 
 
 @pytest.fixture
-def runner(session_factory: sessionmaker[Session]) -> JobRunner:
-    """The same runner the worker process builds, with fixtures wired in."""
-    registry = ToolRegistry()
-    registry.register(
-        FixtureTool(
-            name="fixture_search",
-            category=ToolCategory.WEB_SEARCH,
-            items=(
-                fixture_item(
-                    source_name="Acme FY2025 results",
-                    text=RETRIEVED_TEXT,
-                    source_url="https://acme.example/ir/fy2025",
-                ),
-            ),
-        )
-    )
-    registry.freeze()
+def registry() -> ToolRegistry:
+    return fixture_registry()
 
-    provider = FakeLLMProvider()
-    provider.enqueue(
-        SkeletonClaim(
-            section_title="Revenue",
-            claim_text="Acme reported $1.2bn revenue for FY2025.",
-        )
-    )
 
-    return JobRunner(
-        session_factory,
-        {
-            RETRIEVE_STAGE: RetrieveHandler(registry=registry),
-            SYNTHESIZE_STAGE: SynthesizeHandler(provider=provider),
-        },
-        worker_id="api-test-worker",
-    )
+@pytest.fixture
+def provider() -> FakeLLMProvider:
+    return scripted_provider("Acme Corp", (QUESTION,), AREAS)
 
 
 def start(client: TestClient, objective: str = OBJECTIVE) -> dict[str, str]:
@@ -155,35 +121,54 @@ def test_an_invalid_objective_is_refused_without_echoing_it(
 
 
 async def test_the_version_reads_back_once_the_run_completes(
-    client: TestClient, runner: JobRunner
+    client: TestClient,
+    registry: ToolRegistry,
+    provider: FakeLLMProvider,
+    session_factory: sessionmaker[Session],
 ) -> None:
     created = start(client)
 
-    await runner.run_until_idle()
+    await run_pipeline(session_factory, registry, provider)
 
     response = client.get(f"/v1/research/{created['session_id']}/versions/1")
     assert response.status_code == 200
     body = response.json()
 
     assert body["status"] == "complete"
-    assert len(body["sections"]) == 1
-    assert body["sections"][0]["title"] == "Revenue"
 
-    claim = body["claims"][0]
-    assert claim["claim_type"] == "fact"
-    assert claim["id"] in body["sections"][0]["claim_ids"]
+    # `REQ-SYNTH-003`: the report opens with the executive summary, and
+    # `REQ-SYNTH-005`: the order is explicit and stable.
+    assert body["sections"][0]["is_executive_summary"]
+    assert [section["ordering"] for section in body["sections"]] == list(
+        range(len(body["sections"]))
+    )
+    assert "Revenue" in [section["title"] for section in body["sections"]]
 
-    # The citation map: every fact claim resolves to the source behind it, and
-    # the source carries the retrieval timestamp (`REQ-EVID-004`).
-    assert claim["source_ids"] == [body["sources"][0]["id"]]
+    # Every claim belongs to a section, and every fact resolves to the source
+    # behind it with the time it was read (`REQ-EVID-004`).
+    placed = {
+        claim_id
+        for section in body["sections"]
+        for claim_id in section["claim_ids"]
+    }
+    assert placed == {claim["id"] for claim in body["claims"]}
+
+    facts = [claim for claim in body["claims"] if claim["claim_type"] == "fact"]
+    assert facts
+    known_sources = {source["id"] for source in body["sources"]}
+    assert all(set(fact["source_ids"]) <= known_sources for fact in facts)
+    assert all(fact["source_ids"] for fact in facts)
     assert body["sources"][0]["retrieved_at"] is not None
 
 
 async def test_the_session_header_lists_its_versions(
-    client: TestClient, runner: JobRunner
+    client: TestClient,
+    registry: ToolRegistry,
+    provider: FakeLLMProvider,
+    session_factory: sessionmaker[Session],
 ) -> None:
     created = start(client)
-    await runner.run_until_idle()
+    await run_pipeline(session_factory, registry, provider)
 
     body = client.get(f"/v1/research/{created['session_id']}").json()
 
@@ -193,28 +178,29 @@ async def test_the_session_header_lists_its_versions(
 
 
 async def test_activity_polls_forward_from_a_sequence_number(
-    client: TestClient, runner: JobRunner
+    client: TestClient,
+    registry: ToolRegistry,
+    provider: FakeLLMProvider,
+    session_factory: sessionmaker[Session],
 ) -> None:
     """The Phase 1 transport, and the resume key the Phase 3 SSE upgrade uses
     unchanged (implementation plan §6.3)."""
     created = start(client)
-    await runner.run_until_idle()
+    await run_pipeline(session_factory, registry, provider)
 
     first = client.get(f"/v1/research/{created['session_id']}/activity").json()
-    assert [event["label"] for event in first["events"]] == [
-        "Searching for information",
-        "Searching for information",
-        "Building the report",
-        "Building the report",
-    ]
-    assert first["next_after"] == 4
+    labels = [event["label"] for event in first["events"]]
+    assert "Understanding the objective" in labels
+    assert "Identifying research areas" in labels
+    assert "Building the report" in labels
+    assert first["next_after"] == len(first["events"])
 
     later = client.get(
         f"/v1/research/{created['session_id']}/activity",
         params={"after": first["next_after"]},
     ).json()
     assert later["events"] == []
-    assert later["next_after"] == 4
+    assert later["next_after"] == first["next_after"]
 
 
 def test_activity_before_the_run_starts_is_empty_not_missing(

@@ -9,9 +9,14 @@ wait when there is nothing to do.
 because by the time any content has been retrieved the registry no longer
 accepts registrations.
 
-Phase 0 wires fixtures and the fake provider, because `OPEN-04..09` name no
-providers yet. Each real one lands as a registration next to the fixture it
-replaces — no other file changes.
+Fixtures and a fake provider, because `OPEN-04..09` name no providers yet. Each
+real one lands as a registration next to the fixture it replaces, and no other
+file changes.
+
+Until `OPEN-04` closes, the model is a deterministic stand-in that rearranges
+what retrieval found rather than writing anything of its own, and refuses to run
+in production at all. That is what implementation plan §15 means by exercising
+the pipeline "over fixtures plus the fake LLM".
 """
 
 from __future__ import annotations
@@ -25,14 +30,8 @@ from types import FrameType
 from scrapr_core.config import get_settings
 from scrapr_core.db.engine import build_engine, build_session_factory
 from scrapr_core.jobs import JobRunner
-from scrapr_core.llm import FakeLLMProvider
-from scrapr_core.orchestrator.skeleton import (
-    RETRIEVE_STAGE,
-    SYNTHESIZE_STAGE,
-    RetrieveHandler,
-    SkeletonClaim,
-    SynthesizeHandler,
-)
+from scrapr_core.llm.scripted import ScriptedProvider
+from scrapr_core.orchestrator.pipeline import build_handlers
 from scrapr_core.tools import ToolCategory, ToolRegistry
 from scrapr_core.tools.impl import FixtureTool, fixture_item
 
@@ -50,49 +49,75 @@ resolved. A second of latency on a job that takes minutes is not the bottleneck.
 
 
 def build_registry() -> ToolRegistry:
-    """Register the tools this process may use, then close the registry."""
+    """Register the tools this process may use, then close the registry.
+
+    Two categories with two sources each, because `MIN_SOURCES_PER_QUESTION` is
+    two: a one-source fixture set would leave every question open and make every
+    local run look like a research failure rather than a missing provider.
+    """
     registry = ToolRegistry()
-    registry.register(
-        FixtureTool(
-            name="fixture_search",
-            category=ToolCategory.WEB_SEARCH,
-            items=(
-                fixture_item(
-                    source_name="Example company results",
-                    text=(
-                        "The company reported $1.2bn revenue for FY2025, up 18% "
-                        "year over year."
-                    ),
-                    source_url="https://example.com/ir/fy2025",
-                ),
+
+    for name, category, host, bodies in (
+        (
+            "fixture_search",
+            ToolCategory.WEB_SEARCH,
+            "example.com",
+            (
+                "The company reported $1.2bn revenue for FY2025, up 18% year "
+                "over year.",
+                "Gross margin held at 75% through the year.",
             ),
+        ),
+        (
+            "fixture_news",
+            ToolCategory.NEWS,
+            "press.example",
+            (
+                "The company reported $1.2bn in annual revenue, according to "
+                "its latest filing.",
+                "Hiring continued through the fourth quarter, with 40 open "
+                "engineering roles listed.",
+            ),
+        ),
+    ):
+        registry.register(
+            FixtureTool(
+                name=name,
+                category=category,
+                items=tuple(
+                    fixture_item(
+                        source_name=f"{host} result {index + 1}",
+                        text=body,
+                        source_url=f"https://{host}/{name}/{index + 1}",
+                    )
+                    for index, body in enumerate(bodies)
+                ),
+            )
         )
-    )
+
     registry.freeze()
     return registry
 
 
 def build_runner(worker_id: str) -> JobRunner:
-    """Wire the runner to its handlers.
+    """Wire the runner to the pipeline's stage handlers.
 
-    The fake provider is given a *standing* answer rather than a queue: a worker
-    process serves an unbounded number of runs, and a queue of one would starve
-    the second one. Tests keep the strict queue, which is where running out of
-    responses is information rather than an outage.
+    One line changes when `OPEN-04` closes: the provider. Everything else here
+    is already what production runs, because the stages read their inputs from
+    the database rather than from whatever assembled them.
     """
-    provider = FakeLLMProvider(
-        standing_response=SkeletonClaim(
-            section_title="Revenue",
-            claim_text="The company reported $1.2bn revenue for FY2025.",
+    settings = get_settings()
+    if settings.scrapr_env == "production":
+        # A deterministic echo is a development convenience. Serving it to users
+        # would mean presenting research nobody did.
+        raise RuntimeError(
+            "no AI provider is configured (OPEN-04), and the scripted stand-in "
+            "must never run in production"
         )
-    )
 
     return JobRunner(
         build_session_factory(build_engine()),
-        {
-            RETRIEVE_STAGE: RetrieveHandler(registry=build_registry()),
-            SYNTHESIZE_STAGE: SynthesizeHandler(provider=provider),
-        },
+        build_handlers(ScriptedProvider(), build_registry()),
         worker_id=worker_id,
     )
 

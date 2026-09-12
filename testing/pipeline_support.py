@@ -1,0 +1,186 @@
+"""Driving the research pipeline in tests, without a real model or provider.
+
+Two suites need this: the core integration tests and the API tests. The API's
+version of the flow was previously a copy, and a copy of a test harness drifts
+exactly as fast as a copy of production code.
+
+**Synthesis is primed after research has run.** It has to cite real evidence
+ids, and those do not exist until retrieval and extraction have written rows —
+which is also what a real provider would be doing at that point: reading what
+was actually gathered.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
+
+from scrapr_core.db.enums import ClaimType, SourceCategory
+from scrapr_core.db.models import Evidence
+from scrapr_core.jobs import JobRunner
+from scrapr_core.llm import FakeLLMProvider
+from scrapr_core.orchestrator.extract import ExtractedEvidence, Extraction
+from scrapr_core.orchestrator.interpret import Interpretation
+from scrapr_core.orchestrator.pipeline import build_handlers
+from scrapr_core.orchestrator.plan import _PlanDraft
+from scrapr_core.orchestrator.synthesize import DraftClaim, DraftSection, SynthesisDraft
+from scrapr_core.tools import ToolCategory, ToolRegistry
+from scrapr_core.tools.impl import FixtureTool, fixture_item
+
+__all__ = [
+    "REVENUE_EXCERPT",
+    "REVENUE_TEXT",
+    "default_synthesis",
+    "fixture_registry",
+    "run_pipeline",
+    "scripted_provider",
+    "search_tool",
+]
+
+REVENUE_TEXT = "Acme Corp reported revenue of $1.2bn for fiscal 2025, up 18%."
+REVENUE_EXCERPT = "revenue of $1.2bn"
+HIRING_TEXT = "Acme Corp listed 40 open engineering roles in January."
+
+
+def search_tool(
+    name: str = "fixture_search",
+    category: ToolCategory = ToolCategory.WEB_SEARCH,
+    texts: Sequence[str] = (REVENUE_TEXT, HIRING_TEXT),
+    host: str = "acme.example",
+) -> FixtureTool:
+    """A provider returning distinct sources.
+
+    Distinct matters: `MIN_SOURCES_PER_QUESTION` is two, so a fixture returning
+    one source would leave every question open and make every test a ceiling
+    test by accident.
+    """
+    return FixtureTool(
+        name=name,
+        category=category,
+        items=tuple(
+            fixture_item(
+                source_name=f"{host} result {index}",
+                text=body,
+                source_url=f"https://{host}/{name}/{index}",
+                source_category=SourceCategory.WEB,
+            )
+            for index, body in enumerate(texts)
+        ),
+    )
+
+
+def fixture_registry() -> ToolRegistry:
+    """Web search and news, each with two sources."""
+    registry = ToolRegistry()
+    registry.register(search_tool())
+    registry.register(
+        search_tool(
+            name="fixture_news", category=ToolCategory.NEWS, host="press.example"
+        )
+    )
+    registry.freeze()
+    return registry
+
+
+def scripted_provider(
+    subject: str,
+    questions: Sequence[str],
+    areas: Sequence[tuple[str, Sequence[str], Sequence[str]]],
+) -> FakeLLMProvider:
+    """A provider primed for interpret and plan, with standing extraction.
+
+    Extraction gets a standing answer because the number of extraction calls
+    depends on how many rounds the termination gate decides to run — which is
+    the behaviour under test, not something a fixture should pin down.
+    """
+    provider = FakeLLMProvider(
+        standing_response=Extraction(
+            evidence=[
+                ExtractedEvidence(
+                    statement="Acme reported $1.2bn revenue for FY2025.",
+                    excerpt=REVENUE_EXCERPT,
+                    item_index=0,
+                ),
+                ExtractedEvidence(
+                    statement="Acme listed 40 open engineering roles.",
+                    excerpt="40 open engineering roles",
+                    item_index=1,
+                ),
+            ]
+        )
+    )
+    provider.enqueue(
+        Interpretation(
+            subject=subject,
+            interpretation_note=None,
+            questions=list(questions),
+        ),
+        _PlanDraft(
+            areas=[
+                _PlanDraft.Area(
+                    name=name,
+                    questions=list(area_questions),
+                    tool_categories=list(categories),
+                )
+                for name, area_questions, categories in areas
+            ]
+        ),
+    )
+    return provider
+
+
+def default_synthesis(evidence_ids: Sequence[UUID]) -> SynthesisDraft:
+    """A report citing the first piece of evidence that was gathered."""
+    cited = [str(evidence_ids[0])] if evidence_ids else []
+    return SynthesisDraft(
+        summary=[
+            DraftClaim(
+                text="Acme grew revenue 18% in FY2025 while hiring.",
+                claim_type=ClaimType.FACT,
+                evidence_ids=cited,
+                is_important=True,
+            )
+        ],
+        sections=[
+            DraftSection(
+                title="Revenue",
+                claims=[
+                    DraftClaim(
+                        text="Acme reported $1.2bn revenue for FY2025.",
+                        claim_type=ClaimType.FACT,
+                        evidence_ids=cited,
+                    )
+                ],
+            )
+        ],
+    )
+
+
+async def run_pipeline(
+    session_factory: sessionmaker[Session],
+    registry: ToolRegistry,
+    provider: FakeLLMProvider,
+    synthesis: Callable[[Sequence[UUID]], SynthesisDraft] = default_synthesis,
+    worker_id: str = "pipeline-test",
+) -> None:
+    """Run all four steps, priming synthesis once the evidence exists."""
+    runner = JobRunner(
+        session_factory, build_handlers(provider, registry), worker_id=worker_id
+    )
+
+    await runner.run_one()  # interpret
+    await runner.run_one()  # plan
+    await runner.run_one()  # research
+
+    with session_factory() as session:
+        evidence_ids = list(
+            session.execute(select(Evidence.id).order_by(Evidence.extracted_at))
+            .scalars()
+            .all()
+        )
+    provider.enqueue(synthesis(evidence_ids))
+
+    await runner.run_one()  # synthesize

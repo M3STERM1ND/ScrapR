@@ -25,7 +25,7 @@ from uuid import UUID
 from sqlalchemy import ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from scrapr_core.db.base import Base, CreatedAt, Json, UuidPk
+from scrapr_core.db.base import Base, CreatedAt, Json, JsonList, UuidPk
 from scrapr_core.db.enums import pg_enum
 
 __all__ = ["QuestionEvidence", "QuestionState", "ResearchQuestion"]
@@ -79,7 +79,7 @@ class ResearchQuestion(Base):
         pg_enum(QuestionState, "question_state")
     )
 
-    tool_categories: Mapped[Json] = mapped_column(default=list)
+    tool_categories: Mapped[JsonList] = mapped_column(default=list)
     """Which categories the plan chose for this question's area. Recorded so a
     later reader can see what was tried, and by category rather than by query
     (`REQ-AGENT-003 AC-3`)."""

@@ -158,6 +158,23 @@ class QuestionRepository:
             )
         )
 
+    def evidence_ids_for(self, question_id: UUID) -> Sequence[UUID]:
+        """The evidence recorded as addressing one question.
+
+        Synthesis uses it to tell the model which question each fact answers,
+        so a report can group evidence by the enquiry it came from rather than
+        by the order it happened to arrive in.
+        """
+        return (
+            self._session.execute(
+                select(QuestionEvidence.evidence_id).where(
+                    QuestionEvidence.question_id == question_id
+                )
+            )
+            .scalars()
+            .all()
+        )
+
     def coverage(self, version_id: UUID) -> dict[UUID, QuestionCoverage]:
         """Per-question source counts, for every question in the version.
 

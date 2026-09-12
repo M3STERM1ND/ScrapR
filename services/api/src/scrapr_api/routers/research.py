@@ -34,14 +34,15 @@ from scrapr_api.schemas import (
 )
 from scrapr_core.db.models import Claim, ClaimEvidence, Evidence, ReportSection, Source
 from scrapr_core.db.repositories import ActivityRepository, ResearchRepository, RunRepository
-from scrapr_core.orchestrator.skeleton import RETRIEVE_STAGE, SYNTHESIZE_STAGE
+from scrapr_core.orchestrator.pipeline import STAGES
 
 router = APIRouter(prefix="/v1/research", tags=["research"])
 
-SKELETON_STAGES = (RETRIEVE_STAGE, SYNTHESIZE_STAGE)
-"""Phase 0's two stages. Phase 1 replaces this with a plan the orchestrator
-produces per objective; the route does not change, because enqueuing a run is
-writing rows either way."""
+"""The stages a research run is made of (`orchestrator.pipeline.STAGES`).
+
+The route does not choose them and does not change when they change: enqueuing
+a run is writing rows, and which rows is the pipeline's business.
+"""
 
 
 def _not_found() -> ApiError:
@@ -77,7 +78,7 @@ def create_research(
     if version is None:  # pragma: no cover - we just created it as this owner
         raise _not_found()
 
-    RunRepository(session).create_run(created.id, version.id, SKELETON_STAGES)
+    RunRepository(session).create_run(created.id, version.id, STAGES)
 
     return CreateResearchResponse(
         session_id=created.id,

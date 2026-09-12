@@ -36,12 +36,18 @@ __all__ = [
     "Base",
     "CreatedAt",
     "Json",
+    "JsonList",
     "UuidPk",
     "utcnow",
 ]
 
 Json = dict[str, Any]
-"""A `jsonb` document. Mapped by `Base.type_annotation_map`."""
+"""A `jsonb` object. Mapped by `Base.type_annotation_map`."""
+
+JsonList = list[str]
+"""A `jsonb` array of strings. Distinct from `Json` because the column really
+does hold a list, and typing it as an object makes every read of it a lie the
+type checker cannot catch."""
 
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
@@ -80,6 +86,7 @@ class Base(DeclarativeBase):
         str: Text(),
         # `jsonb`, never `json`: indexable, and normalised on write.
         Json: JSONB(),
+        JsonList: JSONB(),
         # Unconstrained `numeric`. Financial values arrive at whatever precision
         # the source published, and rounding them at the storage layer would
         # destroy the raw value that `REQ-EVID-008` requires be retained.

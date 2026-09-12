@@ -13,23 +13,37 @@ nothing internal.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pipeline_support import fixture_registry, run_pipeline, scripted_provider
-from sqlalchemy import text
+from pipeline_support import (
+    fixture_registry,
+    run_pipeline,
+    scripted_provider,
+)
+from pipeline_support import (
+    search_tool as fixture_search_tool,
+)
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from scrapr_api import deps
 from scrapr_api.deps import ANONYMOUS_COOKIE
-from scrapr_core.db.repositories import ResearchRepository
+from scrapr_core.db.enums import RunStatus, StepStatus
+from scrapr_core.db.models import ResearchRun
+from scrapr_core.db.repositories import ResearchRepository, RunRepository
 from scrapr_core.llm import FakeLLMProvider
-from scrapr_core.tools import ToolRegistry
+from scrapr_core.orchestrator.pipeline import STAGES
+from scrapr_core.tools import ToolCategory, ToolRegistry
+from scrapr_core.tools.impl import FailingFixtureTool
 
 pytestmark = pytest.mark.integration
 
 OBJECTIVE = "How is Acme Corp positioned against its competitors?"
 QUESTION = "What is Acme's revenue?"
+HIRING_QUESTION = "How many roles is Acme hiring for?"
 AREAS = (("Financial performance", (QUESTION,), ("web_search",)),)
 
 
@@ -377,3 +391,78 @@ def test_an_unlisted_origin_is_not_allowed(client: TestClient) -> None:
     )
 
     assert "access-control-allow-origin" not in response.headers
+
+
+async def test_a_partial_run_tells_the_reader_what_is_missing(
+    client: TestClient,
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-AGENT-009 AC-2` through the wire.
+
+    The area that could not be researched is named in the payload the workspace
+    renders, as an uncertainty claim in the summary. A status word alone would
+    tell a reader that something is missing without telling them what.
+    """
+    registry = ToolRegistry()
+    registry.register(fixture_search_tool())
+    registry.register(
+        FailingFixtureTool(name="broken_news", category=ToolCategory.NEWS)
+    )
+    registry.freeze()
+
+    created = start(client)
+    await run_pipeline(
+        session_factory,
+        registry,
+        scripted_provider(
+            "Acme Corp",
+            (QUESTION, HIRING_QUESTION),
+            (
+                ("Financial performance", (QUESTION,), ("web_search",)),
+                ("Hiring", (HIRING_QUESTION,), ("news",)),
+            ),
+        ),
+    )
+
+    header = client.get(f"/v1/research/{created['session_id']}").json()
+    assert header["status"] == "partial"
+
+    body = client.get(f"/v1/research/{created['session_id']}/versions/1").json()
+    summary = body["sections"][0]
+    assert summary["is_executive_summary"]
+
+    summary_claims = [
+        claim for claim in body["claims"] if claim["id"] in summary["claim_ids"]
+    ]
+    uncertainties = [
+        claim["text"]
+        for claim in summary_claims
+        if claim["claim_type"] == "uncertainty"
+    ]
+    assert any("Hiring" in text for text in uncertainties), uncertainties
+
+
+def test_research_is_queued_durably_before_the_response_returns(
+    client: TestClient, session_factory: sessionmaker[Session]
+) -> None:
+    """`REQ-AGENT-008 AC-1`, `AC-2`.
+
+    The request returns immediately, and what it leaves behind is rows: a run
+    and its steps, waiting for whatever picks them up. Nothing about the work is
+    held in the request, so closing the browser cannot terminate it — there is
+    no connection for the research to be attached to.
+    """
+    created = start(client)
+
+    with session_factory() as session:
+        run = session.execute(
+            select(ResearchRun).where(
+                ResearchRun.session_id == UUID(created["session_id"])
+            )
+        ).scalar_one()
+        steps = RunRepository(session).steps(run.id)
+
+    assert run.status is RunStatus.PENDING
+    assert [step.stage for step in steps] == list(STAGES)
+    assert all(step.status is StepStatus.PENDING for step in steps)
+    assert all(step.lease_owner is None for step in steps)

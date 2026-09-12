@@ -42,6 +42,7 @@ __all__ = [
     "SynthesisInput",
     "SynthesisResult",
     "synthesize",
+    "with_area_gaps",
 ]
 
 SUMMARY_TITLE = "Executive summary"
@@ -198,6 +199,62 @@ def _uncertainty_claims(unresolved: Sequence[str]) -> tuple[Claim, ...]:
             is_important=True,
         )
         for question in unresolved
+    )
+
+
+def with_area_gaps(
+    sections: Sequence[Section], gaps: Sequence[str]
+) -> tuple[Section, ...]:
+    """Put the run's area-level gaps into the report itself.
+
+    `REQ-AGENT-009 AC-2` says a report produced with failed areas **states which
+    areas could not be researched**. The obvious reading of "states" is that the
+    report says it, not that a log line somewhere records it — so the gaps
+    become uncertainty claims like any other unanswered thing, and travel
+    through the same payload, the same citation rules and the same rendering.
+
+    They go in the executive summary because that is where a reader finds out
+    what they are about to read, and learning halfway down that a third of the
+    subject was never covered is learning it too late (`AC-4`).
+    """
+    if not gaps:
+        return tuple(sections)
+
+    claims = tuple(
+        Claim(text=gap, claim_type=ClaimType.UNCERTAINTY, is_important=True)
+        for gap in gaps
+    )
+
+    if sections and sections[0].is_executive_summary:
+        summary = sections[0]
+        return (
+            Section(
+                title=summary.title,
+                ordering=summary.ordering,
+                claims=(*summary.claims, *claims),
+                is_executive_summary=True,
+            ),
+            *sections[1:],
+        )
+
+    # No summary to attach to: a run that produced nothing still owes the
+    # reader the reason, so the gaps become the report.
+    return (
+        Section(
+            title="What could not be researched",
+            ordering=0,
+            claims=claims,
+            is_executive_summary=True,
+        ),
+        *(
+            Section(
+                title=section.title,
+                ordering=index + 1,
+                claims=section.claims,
+                is_executive_summary=False,
+            )
+            for index, section in enumerate(sections)
+        ),
     )
 
 

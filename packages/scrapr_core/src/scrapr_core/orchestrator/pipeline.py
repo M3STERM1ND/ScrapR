@@ -79,6 +79,7 @@ from scrapr_core.orchestrator.synthesize import (
     Section,
     SynthesisInput,
     synthesize,
+    with_area_gaps,
 )
 from scrapr_core.synthesis.validation import validate_version
 from scrapr_core.tools.contract import ToolCategory
@@ -448,10 +449,15 @@ class SynthesizeHandler:
         inputs = _synthesis_inputs(context, questions)
         unresolved = [q.text for q in questions.unresolved_for_version(version_id)]
 
+        # The outcome is computed first, because the gaps it names belong in
+        # the report rather than only in this step's checkpoint
+        # (`REQ-AGENT-009 AC-2`).
+        outcome = summarise_run(_area_outcomes(context, questions), unresolved)
+
         result = await synthesize(
             inputs, unresolved, research.objective, self.provider
         )
-        _persist_report(context, result.sections)
+        _persist_report(context, with_area_gaps(result.sections, outcome.gaps))
 
         report = validate_version(context.session, version_id)
         if not report.passed:
@@ -459,7 +465,6 @@ class SynthesizeHandler:
             # (`REQ-EVID-017 AC-3`).
             raise StepPermanentError(report.summary())
 
-        outcome = summarise_run(_area_outcomes(context, questions), unresolved)
         _close_version(context, outcome.status)
 
         activity.append(

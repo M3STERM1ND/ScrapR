@@ -331,3 +331,58 @@ async def test_a_version_with_gaps_closes_as_partial(
         ).scalar_one()
 
     assert status is ResearchStatus.PARTIAL
+
+
+async def test_a_failed_area_is_named_in_the_report(
+    session_factory: sessionmaker[Session]
+) -> None:
+    """`REQ-AGENT-009 AC-2`: the report states which areas could not be
+    researched. In the report, not in a log line nobody reads."""
+    registry = ToolRegistry()
+    registry.register(search_tool(texts=(REVENUE_TEXT, HIRING_TEXT)))
+    registry.register(
+        FailingFixtureTool(name="broken_news", category=ToolCategory.NEWS)
+    )
+    registry.freeze()
+    session_id = start_research(session_factory)
+
+    await run_pipeline(session_factory, registry, provider_for())
+
+    with session_factory() as session:
+        research = session.get(ResearchSession, session_id)
+        assert research is not None
+        version_id = research.current_version_id
+        assert version_id is not None
+
+        claims = (
+            session.execute(select(Claim).where(Claim.version_id == version_id))
+            .scalars()
+            .all()
+        )
+        sections = (
+            session.execute(
+                select(ReportSection)
+                .where(ReportSection.version_id == version_id)
+                .order_by(ReportSection.ordering)
+            )
+            .scalars()
+            .all()
+        )
+
+    named = [
+        claim.text
+        for claim in claims
+        if claim.claim_type is ClaimType.UNCERTAINTY and "Hiring" in claim.text
+    ]
+    assert named, f"no claim names the failed area: {[c.text for c in claims]}"
+
+    # It belongs to the summary, because learning halfway down that an area was
+    # never covered is learning it too late (`AC-4`).
+    summary = sections[0]
+    assert summary.is_executive_summary
+    summary_claims = {
+        claim.id for claim in claims if claim.section_id == summary.id
+    }
+    gap_claim = next(c for c in claims if c.text in named)
+    assert gap_claim.id in summary_claims
+    assert gap_claim.is_important

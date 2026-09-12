@@ -17,12 +17,15 @@ from scrapr_core.llm import FakeLLMProvider, ModelTier
 from scrapr_core.orchestrator.synthesize import (
     INSTRUCTION,
     SUMMARY_TITLE,
+    Claim,
     DraftClaim,
     DraftSection,
+    Section,
     SynthesisDraft,
     SynthesisInput,
     SynthesisResult,
     synthesize,
+    with_area_gaps,
 )
 
 OBJECTIVE = "How is Acme positioned against its competitors?"
@@ -294,3 +297,122 @@ async def test_synthesis_runs_at_standard_tier(tier: ModelTier) -> None:
     await synthesize(EVIDENCE, [], OBJECTIVE, provider)
 
     assert provider.calls[0].tier is tier
+
+
+# --------------------------------------------------------------------------
+# Area-level gaps in the report (`REQ-AGENT-009 AC-2`)
+# --------------------------------------------------------------------------
+
+
+def test_area_gaps_join_the_executive_summary() -> None:
+    """A reader finds out what they are about to read in the summary. Learning
+    halfway down that a third of the subject was never covered is too late."""
+    sections = (
+        Section(
+            title=SUMMARY_TITLE,
+            ordering=0,
+            claims=(Claim(text="Revenue grew.", claim_type=ClaimType.FACT),),
+            is_executive_summary=True,
+        ),
+        Section(
+            title="Revenue",
+            ordering=1,
+            claims=(Claim(text="Revenue grew.", claim_type=ClaimType.FACT),),
+        ),
+    )
+
+    result = with_area_gaps(sections, ["Hiring could not be researched."])
+
+    assert len(result) == 2
+    summary_claims = result[0].claims
+    assert summary_claims[-1].text == "Hiring could not be researched."
+    assert summary_claims[-1].claim_type is ClaimType.UNCERTAINTY
+    assert summary_claims[-1].is_important
+
+
+def test_no_gaps_leaves_the_report_untouched() -> None:
+    sections = (
+        Section(
+            title=SUMMARY_TITLE,
+            ordering=0,
+            claims=(Claim(text="Revenue grew.", claim_type=ClaimType.FACT),),
+            is_executive_summary=True,
+        ),
+    )
+
+    assert with_area_gaps(sections, []) == sections
+
+
+def test_gaps_become_the_report_when_there_is_nothing_else() -> None:
+    """A run that produced nothing still owes the reader the reason."""
+    result = with_area_gaps((), ["Hiring could not be researched."])
+
+    assert len(result) == 1
+    assert result[0].is_executive_summary
+    assert result[0].title == "What could not be researched"
+    assert result[0].claims[0].text == "Hiring could not be researched."
+
+
+def test_gaps_are_prepended_when_a_report_has_no_summary() -> None:
+    """Ordering stays contiguous, because `REQ-SYNTH-005` makes it the report's
+    structure rather than a display hint."""
+    sections = (
+        Section(
+            title="Revenue",
+            ordering=0,
+            claims=(Claim(text="Revenue grew.", claim_type=ClaimType.FACT),),
+        ),
+    )
+
+    result = with_area_gaps(sections, ["Hiring could not be researched."])
+
+    assert [section.ordering for section in result] == [0, 1]
+    assert result[0].is_executive_summary
+    assert result[1].title == "Revenue"
+
+
+# --------------------------------------------------------------------------
+# Sections come from the objective and the evidence (`REQ-AGENT-006`)
+# --------------------------------------------------------------------------
+
+
+async def test_the_report_has_no_static_section_template() -> None:
+    """`AC-3`: section selection is derived, not stamped out.
+
+    Two different drafts over the same evidence produce two different section
+    sets, because nothing in this stage carries a list of sections a report is
+    supposed to have. A hiring report with an empty stock section (`AC-1`) is
+    impossible for the same reason: there is no section it did not ask for.
+    """
+    hiring = await run(
+        SynthesisDraft(
+            summary=[claim()],
+            sections=[DraftSection(title="Hiring and headcount", claims=[claim()])],
+        )
+    )
+    investment = await run(
+        SynthesisDraft(
+            summary=[claim()],
+            sections=[DraftSection(title="Valuation", claims=[claim()])],
+        )
+    )
+
+    assert [s.title for s in hiring.sections] == [SUMMARY_TITLE, "Hiring and headcount"]
+    assert [s.title for s in investment.sections] == [SUMMARY_TITLE, "Valuation"]
+
+
+async def test_a_section_the_evidence_does_not_support_never_appears() -> None:
+    """`AC-1`, `AC-2`: no padded section, because a section whose claims all
+    fail the rules is dropped rather than shipped empty."""
+    result = await run(
+        SynthesisDraft(
+            summary=[claim()],
+            sections=[
+                DraftSection(title="Stock information", claims=[]),
+                DraftSection(title="Revenue", claims=[claim()]),
+            ],
+        )
+    )
+
+    assert "Stock information" not in [s.title for s in result.sections]
+    assert "Revenue" in [s.title for s in result.sections]

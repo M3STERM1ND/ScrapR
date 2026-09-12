@@ -228,3 +228,41 @@ async def test_the_interpretation_travels_as_material() -> None:
     labels = [document.label for document in provider.calls[0].documents]
     assert labels == ["interpretation", "available tool categories"]
     assert "NVIDIA" in provider.calls[0].rendered
+
+
+# --------------------------------------------------------------------------
+# Areas nobody predicted (`REQ-AGENT-010`)
+# --------------------------------------------------------------------------
+
+
+async def test_an_area_nobody_anticipated_is_planned_like_any_other() -> None:
+    """`AC-1`: a discovered area becomes a section without a code change.
+
+    Area names are strings the planner chose, and nothing in the pipeline
+    matches against a list of known ones. This test is what stops that becoming
+    a static taxonomy later without somebody noticing.
+    """
+    plan = await run_plan(
+        draft(("Regulatory exposure in the EU", QUESTIONS, ["web_search"]))
+    )
+
+    assert plan.areas[0].name == "Regulatory exposure in the EU"
+    assert plan.areas[0].questions == QUESTIONS
+
+
+async def test_a_discovered_area_gets_no_special_treatment() -> None:
+    """`AC-2`: subject to the same evidence and citation rules as any other.
+
+    It is planned by the same code path, so there is nowhere for an exemption
+    to live — which is the point worth protecting.
+    """
+    plan = await run_plan(
+        draft(
+            ("Financial performance", QUESTIONS[:1], ["financial"]),
+            ("Something nobody listed", QUESTIONS[1:], ["web_search"]),
+        )
+    )
+
+    assert all(area.tool_categories for area in plan.areas)
+    assert all(area.questions for area in plan.areas)
+    assert sorted(plan.questions()) == sorted(QUESTIONS)

@@ -132,6 +132,8 @@ export function Workspace({ sessionId }: Props) {
             {session.subject_interpretation_note}
           </p>
         ) : null}
+
+        {session ? <ShortfallNotice status={session.status} /> : null}
       </header>
 
       <div className="hairline mt-10" />
@@ -144,7 +146,7 @@ export function Workspace({ sessionId }: Props) {
             <p className="measure text-body text-ink-muted">
               {running
                 ? "ScrapR is reading the sources. The report appears here as soon as it holds together."
-                : "No report was produced for this research."}
+                : "No report was produced. Nothing usable could be gathered for this question, so there is nothing to show rather than a report built on nothing."}
             </p>
           )}
         </div>
@@ -157,6 +159,29 @@ export function Workspace({ sessionId }: Props) {
         </aside>
       </div>
     </div>
+  );
+}
+
+/**
+ * Says plainly that the research came back short (`REQ-AGENT-009 AC-2`, `AC-4`).
+ *
+ * The gaps themselves are in the report, as uncertainty claims naming each area
+ * that could not be researched — that is where a reader meets them in context.
+ * This is the part that has to be visible before any of it is read, so nobody
+ * mistakes a partial report for a complete one.
+ */
+function ShortfallNotice({ status }: { status: ResearchSession["status"] }) {
+  if (status !== "partial" && status !== "failed") return null;
+
+  return (
+    <p
+      className="measure mt-5 border-l-2 border-ochre-deep pl-4 text-small text-ink-soft"
+      role="status"
+    >
+      {status === "partial"
+        ? "Parts of this question could not be answered. What is missing is marked in the report, and nothing has been filled in with guesswork."
+        : "This research could not be completed. Nothing below should be read as a finding."}
+    </p>
   );
 }
 

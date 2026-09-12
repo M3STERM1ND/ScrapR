@@ -37,12 +37,19 @@ test("a question becomes an evidence-backed report", async ({ page }) => {
   await expect(page).toHaveURL(/\/research\/[0-9a-f-]{36}$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(OBJECTIVE);
 
-  // Activity arrives by polling `?after={seq}`.
-  // `exact` matters: the timeline also carries an aria-live region that
-  // announces "<label>: <status>", and a loose match would resolve to both.
+  // Activity arrives by polling `?after={seq}`, narrating the pipeline's
+  // stages in the plain language `REQ-ACT-002` asks for.
+  //
+  // `exact` matters: the timeline also carries an aria-live region announcing
+  // "<label>: <status>", and a loose match would resolve to both. Only the
+  // fixed stage labels are asserted — the per-area ones are named by the plan,
+  // so pinning them here would make a planning change look like a UI failure.
   const activity = page.getByRole("region", { name: "Activity" });
   await expect(
-    activity.getByText("Searching for information", { exact: true }),
+    activity.getByText("Understanding the objective", { exact: true }),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(
+    activity.getByText("Identifying research areas", { exact: true }),
   ).toBeVisible({ timeout: 30_000 });
   await expect(
     activity.getByText("Building the report", { exact: true }),

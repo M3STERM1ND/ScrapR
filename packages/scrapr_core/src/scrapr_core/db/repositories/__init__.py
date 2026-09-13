@@ -19,6 +19,11 @@ from scrapr_core.db.repositories.evidence import EvidenceRepository
 from scrapr_core.db.repositories.questions import QuestionCoverage, QuestionRepository
 from scrapr_core.db.repositories.research import ResearchRepository
 from scrapr_core.db.repositories.runs import RunRepository
+from scrapr_core.db.repositories.uploads import (
+    LimitBreach,
+    SessionTotals,
+    UploadRepository,
+)
 
 __all__ = [
     "ActivityRepository",
@@ -26,9 +31,12 @@ __all__ = [
     "ConversationRepository",
     "EvidenceRepository",
     "IssuedSession",
+    "LimitBreach",
     "QuestionCoverage",
     "QuestionRepository",
     "ResearchRepository",
     "RunRepository",
+    "SessionTotals",
+    "UploadRepository",
     "hash_session_token",
 ]

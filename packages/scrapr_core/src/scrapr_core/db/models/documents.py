@@ -6,14 +6,15 @@ would be absurd. What is version-scoped is the `sources` row that points at it,
 which is how a document's retrieval timestamp still differs per version
 (`REQ-VER-003 AC-2`).
 
-`storage_key` names an object in whatever store `OPEN-10` selects. Nothing here
-depends on which one: the column is a key, not a URL, so a provider change is a
-config change.
+`storage_key` names an object in the bucket `DEC-12` chose. Nothing here
+depends on which provider serves it: the column is a key, not a URL, so R2 in
+production and MinIO locally are the same rows.
 
-`upload_chunks` carries **no embedding column**. Whether retrieval over
-documents needs vector search at all is `OPEN-12`, and adding a `vector` column
-means installing pgvector — a real infrastructure commitment that must not be
-made accidentally by a baseline migration.
+`upload_chunks` carries **no embedding column**. `DEC-15` closed `OPEN-12`
+against vector search: the corpus is one user's ten files, which is the size at
+which keyword recall is high, and pgvector is a real infrastructure commitment
+that must not be made accidentally. Retrieval runs on a Postgres full-text index
+over `text`, declared below and created in migration `0004`.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from __future__ import annotations
 import datetime as dt
 from uuid import UUID
 
-from sqlalchemy import BigInteger, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, Index, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from scrapr_core.db.base import Base, CreatedAt, Json, UuidPk
@@ -48,7 +49,8 @@ class Upload(Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger)
 
     storage_key: Mapped[str]
-    """Object key in the store `OPEN-10` selects."""
+    """Object key in the bucket. `DEC-12` makes the S3 API the contract, so this
+    is a key rather than a URL and changing provider changes configuration."""
 
     sha256: Mapped[str]
     """Content hash: integrity, and the basis for recognising a re-upload."""
@@ -77,6 +79,15 @@ class UploadChunk(Base):
     __table_args__ = (
         UniqueConstraint("upload_id", "ordinal"),
         Index("ix_upload_chunks_upload_id", "upload_id"),
+        # `DEC-15`. The expression must stay character-identical to the one
+        # `tools/impl/documents.py` builds: a different text-search
+        # configuration plans a sequential scan, so the index would appear
+        # present and do nothing.
+        Index(
+            "ix_upload_chunks_fts",
+            func.to_tsvector(text("'english'"), text("text")),
+            postgresql_using="gin",
+        ),
     )
 
     id: Mapped[UuidPk]

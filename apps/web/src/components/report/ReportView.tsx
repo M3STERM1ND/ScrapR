@@ -46,12 +46,14 @@ const CLAIM_WORD: Record<Claim["claim_type"], string> = {
   uncertainty: "Uncertain",
 };
 
-/* Filled and hollow marks, so the level survives greyscale and a screenshot.
-   Paired with the word below — never the marks alone. */
-const CONFIDENCE_MARK: Record<string, string> = {
-  high: "●●●",
-  moderate: "●●○",
-  low: "●○○",
+/* How many of three dots are filled. Inline SVG, 1.5px stroke, per
+   MASTER.md's "no emoji as icons" rule: geometric-shape characters are not
+   emoji, but they were doing an icon's job, and they render differently in
+   every font. Paired always with the word, never shown alone. */
+const CONFIDENCE_FILLED: Record<string, number> = {
+  high: 3,
+  moderate: 2,
+  low: 1,
 };
 
 const CONFIDENCE_WORD: Record<string, string> = {
@@ -199,11 +201,14 @@ function ClaimBlock({
 /**
  * A disagreement, shown (`REQ-WORK-009`, `REQ-EVID-012 AC-3`).
  *
- * Both values, each with its source and tier, so a reader can weigh them
- * rather than being handed a verdict. The explanation appears when the
- * evidence supports one (`REQ-EVID-013 AC-2`); when it does not, the block
- * says "unresolved" in as many words (`REQ-EVID-014 AC-1`) instead of
- * inventing a reason.
+ * Laid out the way masterplan §6 works the example: the primary value first
+ * with its source, then the conflicting one, then the explanation. Which value
+ * leads is decided by source tier in the pipeline, not by retrieval order, so
+ * the figure closer to the origin is the one a skimming reader takes away.
+ *
+ * The explanation appears when the evidence supports one (`REQ-EVID-013
+ * AC-2`); when it does not, the block says unresolved in as many words
+ * (`REQ-EVID-014 AC-1`) rather than inventing a reason.
  */
 function ConflictBlock({
   conflict,
@@ -217,21 +222,28 @@ function ConflictBlock({
     ? CAUSE_WORD[conflict.explanation_category]
     : null;
 
+  const primary = conflict.sides.find((side) => side.label === "primary");
+  const competing = conflict.sides.filter((side) => side.label !== "primary");
+  const ordered = primary ? [primary, ...competing] : conflict.sides;
+
   return (
     <div className="conflict mt-4">
       <p className="conflict-label">
-        {unresolved ? "Sources disagree — unresolved" : "Sources disagree"}
+        {unresolved ? "Sources disagree, unresolved" : "Sources disagree"}
       </p>
 
       <ul className="mt-2 flex flex-col gap-2">
-        {conflict.sides.map((side) => {
+        {ordered.map((side, index) => {
           const source = sourcesById.get(side.source_id);
           return (
             <li key={side.evidence_id} className="text-micro text-ink-muted">
+              <span className="text-ink-soft">
+                {index === 0 ? "Primary value" : "Conflicting value"}:
+              </span>{" "}
               <span className="tnum text-ink">{side.value}</span>
               {source ? (
                 <>
-                  {" — "}
+                  {", from "}
                   {source.url ? (
                     <a
                       href={source.url}
@@ -243,10 +255,12 @@ function ConflictBlock({
                     </a>
                   ) : (
                     <span>{source.name}</span>
-                  )}{" "}
+                  )}
+                  {". "}
                   <span className="tier-tag">
                     {TIER_WORD[source.authority_tier] ?? source.authority_tier}
-                  </span>{" "}
+                  </span>
+                  {". "}
                   <span className="tnum">Read {formatDate(source.retrieved_at)}</span>
                 </>
               ) : null}
@@ -256,7 +270,7 @@ function ConflictBlock({
       </ul>
 
       {cause ? (
-        <p className="mt-2 text-micro text-ink-soft">Likely because {cause}.</p>
+        <p className="mt-2 text-micro text-ink-soft">Possible explanation: {cause}.</p>
       ) : (
         /* `REQ-EVID-013 AC-3`: explanations are never invented, so the honest
            output here is to say nothing accounts for the gap. */
@@ -269,6 +283,39 @@ function ConflictBlock({
   );
 }
 
+/**
+ * Three dots, as many filled as the level warrants.
+ *
+ * Inline SVG at 1.5px stroke, per MASTER.md's "no emoji as icons" rule.
+ * Geometric-shape characters are not emoji, but they were doing an icon's job
+ * and they render at a different size in every font, which is exactly the
+ * inconsistency that rule exists to prevent.
+ */
+function ConfidenceDots({ filled }: { filled: number }) {
+  return (
+    <svg
+      width="30"
+      height="8"
+      viewBox="0 0 30 8"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {[0, 1, 2].map((index) => (
+        <circle
+          key={index}
+          cx={4 + index * 11}
+          cy="4"
+          r="3"
+          fill={index < filled ? "currentColor" : "none"}
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+      ))}
+    </svg>
+  );
+}
+
 /* `REQ-EVID-015 AC-1`: shown wherever the claim appears. Null is possible only
    for a version written before Phase 2, so it renders nothing rather than
    inventing a level for research that never had one assessed. */
@@ -278,11 +325,11 @@ function ConfidenceTag({ confidence }: { confidence: string | null }) {
   return (
     <span
       className={`confidence-mark ${CONFIDENCE_CLASS[confidence]}`}
-      /* The marks are decorative; the word is the accessible name, so a screen
-         reader hears "Moderate confidence" rather than three bullet glyphs. */
+      /* The dots are decorative; the word is the accessible name, so a screen
+         reader hears "Moderate confidence" rather than counting circles. */
       aria-label={CONFIDENCE_WORD[confidence]}
     >
-      <span aria-hidden="true">{CONFIDENCE_MARK[confidence]}</span>{" "}
+      <ConfidenceDots filled={CONFIDENCE_FILLED[confidence]} />
       {CONFIDENCE_WORD[confidence]}
     </span>
   );

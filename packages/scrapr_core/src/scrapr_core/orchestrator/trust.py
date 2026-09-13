@@ -248,12 +248,21 @@ def _persist(
     session.add(conflict)
     session.flush()
 
-    for side, cited in (("first", left), ("second", right)):
+    # `REQ-WORK-009 AC-1` and masterplan §6: a conflicted claim shows the
+    # *primary* value with its source, then the *conflicting* one. Which is
+    # which is decided by tier — the figure closer to the origin leads — and
+    # not by the order the two happened to be retrieved in.
+    ranked = sorted(
+        (left, right),
+        key=lambda cited: _TIER_RANK[cited.source.authority_tier],
+        reverse=True,
+    )
+    for role, cited in zip(("primary", "conflicting"), ranked, strict=True):
         session.add(
             ConflictEvidence(
                 conflict_id=conflict.id,
                 evidence_id=cited.evidence.id,
-                label=f"{side}: {cited.source.name}",
+                label=role,
             )
         )
     session.flush()

@@ -289,8 +289,10 @@
    the word, the filled/hollow marks, and only then weight. Greyscale-safe by
    construction, which is what `NFR-USE-002` asks for. */
 @utility confidence-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
   font-size: var(--text-micro);
-  letter-spacing: 0.12em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -314,10 +316,11 @@
 /* Source tier, beside the citation. `REQ-EVID-003 AC-2` requires a source's
    tier and its effect on confidence be visible, so a reader can see why a
    claim is rated the way it is rather than being asked to trust the rating. */
+/* Sentence case, no tracking. MASTER.md: "Sentence case everywhere. No
+   all-caps, no small-caps, no letter-spaced eyebrows." An uppercase tracked
+   tag is exactly the eyebrow that rule names. */
 @utility tier-tag {
   font-size: var(--text-micro);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   color: var(--color-ink-muted);
 }
 
@@ -329,14 +332,14 @@
    warned off. */
 @utility conflict {
   border-left: 2px solid var(--color-line-strong);
-  background: var(--color-surface-sunken, transparent);
+  border-radius: 8px;
+  background: var(--color-sunk);
   padding: 0.75rem 1rem;
 }
 
 @utility conflict-label {
   font-size: var(--text-micro);
   font-weight: 500;
-  letter-spacing: 0.04em;
   color: var(--color-ink);
 }
 

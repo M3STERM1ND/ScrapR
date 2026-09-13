@@ -282,3 +282,49 @@ def test_an_unknown_publication_date_is_not_stale() -> None:
     """Absence of a date is absence of evidence about age. Demoting for it
     would punish sources that simply do not publish one."""
     assert not is_stale(None, MetricClass.SHARE_PRICE)
+
+
+# --------------------------------------------------------------------------
+# The reported form is a figure, not a sentence
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param(
+            "Acme Corp reported revenue of USD 1.2bn for fiscal 2025.",
+            "1.2bn",
+            id="figure-not-sentence",
+        ),
+        pytest.param("Revenue of $1,198m", "$1,198m", id="symbol-and-commas"),
+        pytest.param("4,000 employees", "4,000", id="noun-is-not-a-scale"),
+        pytest.param("Operating margin of 2.4%", "2.4%", id="percent-survives"),
+        pytest.param("Loss of -$3.4m", "-$3.4m", id="sign-survives"),
+    ],
+)
+def test_the_reported_form_is_the_figure_alone(text: str, expected: str) -> None:
+    """`REQ-EVID-008 AC-2` retains the reported *value*, and
+    `evidence.value_raw` documents the shape: `"$1.2bn"`, `"12,345"`.
+
+    Found by looking at the rendered conflict panel, which read "Primary value:
+    Acme Corp reported revenue of USD 1.2bn for fiscal 2025., from ..." — the
+    sentence serving as both the value and the claim, with the punctuation of
+    both. No unit test caught it because none of them asserted the shape of
+    `reported`; they asserted the number parsed out of it.
+
+    The two traps are in here: the scale group matches any short run of
+    letters, so "employees" would ride along as a unit, and a trailing percent
+    sits outside the match entirely, so "2.4%" would lose the character that
+    says what it is.
+    """
+    assert normalize_value(text).reported == expected
+
+
+def test_a_statement_with_no_figure_keeps_the_statement() -> None:
+    """With no span to point at, the sentence is the most faithful thing to
+    keep — and it is still marked non-comparable."""
+    normalized = normalize_value("The company grew strongly.")
+
+    assert normalized.reported == "The company grew strongly."
+    assert not normalized.comparable

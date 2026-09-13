@@ -204,8 +204,11 @@ def get_version(
                     label=label,
                     # The reported form, never the normalised one
                     # (`REQ-EVID-008 AC-2`): a reader comparing two values must
-                    # see what each source actually published.
-                    value=evidence.value_raw or evidence.content,
+                    # see what each source actually published. The currency is
+                    # rejoined because the parser separates it out, and "1.2bn"
+                    # against "1.9bn" with no unit is a comparison the reader
+                    # cannot check.
+                    value=_reported_value(evidence),
                 )
             )
 
@@ -265,6 +268,14 @@ def get_version(
             for row in conflict_rows
         ],
     )
+
+
+def _reported_value(evidence: Evidence) -> str:
+    """The figure as published, with its currency back in front of it."""
+    figure = evidence.value_raw or evidence.content
+    if evidence.currency and evidence.currency not in figure:
+        return f"{evidence.currency} {figure}"
+    return figure
 
 
 def _single_period(found: set[str]) -> str | None:

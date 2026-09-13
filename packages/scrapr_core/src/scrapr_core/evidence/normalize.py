@@ -137,6 +137,15 @@ class NormalizedValue:
     """
 
     reported: str
+    """The figure exactly as the source wrote it: `"$1.2bn"`, `"12,345"`,
+    `"(3.4)%"` — the span the number occupies, not the sentence around it.
+
+    `REQ-EVID-008 AC-2` calls this the reported *value*, and `evidence.value_raw`
+    documents the same shape. Storing the whole statement here made the conflict
+    panel read "Primary value: Acme Corp reported revenue of USD 1.2bn for
+    fiscal 2025., from ..." — the sentence twice over, once as the value and
+    once as the claim it supports."""
+
     status: NormalizationStatus
     metric_class: MetricClass = MetricClass.UNKNOWN
     value: Decimal | None = None
@@ -191,7 +200,8 @@ def normalize_value(text: str, *, currency_hint: str | None = None) -> Normalize
 
     if match is None:
         # `AC-3`: no number is not a zero, and it is not a comparison failure
-        # either. There is simply nothing here to compare.
+        # either. There is simply nothing here to compare. With no span to
+        # point at, the statement itself is the most faithful thing to keep.
         return NormalizedValue(
             reported=text.strip(),
             status=NormalizationStatus.NON_COMPARABLE,
@@ -212,8 +222,16 @@ def normalize_value(text: str, *, currency_hint: str | None = None) -> Normalize
         magnitude = -magnitude
 
     scale_word = (match.group("scale") or "").lower().rstrip(".")
-    if scale_word in SCALE_WORDS:
+    scaled = scale_word in SCALE_WORDS
+    if scaled:
         magnitude *= Decimal(10) ** SCALE_WORDS[scale_word]
+
+    # Rebuilt from the parts that were actually understood, rather than taken
+    # from the raw match. The `scale` group is any short run of letters, so
+    # "4,000 employees" would otherwise report the noun as part of the figure —
+    # and a trailing `%` sits outside the match entirely, so "2.4%" would lose
+    # the one character that says what it is.
+    span = _reported_span(text, match, scaled)
 
     is_percentage = "%" in text or metric is MetricClass.RATIO
     currency = _currency_of(text, match.group("symbol")) or (
@@ -225,20 +243,52 @@ def normalize_value(text: str, *, currency_hint: str | None = None) -> Normalize
     # dollars. Guessing here is how two correct sources become a conflict.
     if metric is MetricClass.CURRENCY and not currency:
         return NormalizedValue(
-            reported=text.strip(),
+            reported=span,
             status=NormalizationStatus.NON_COMPARABLE,
             metric_class=metric,
             value=magnitude,
         )
 
     return NormalizedValue(
-        reported=text.strip(),
+        reported=span,
         status=NormalizationStatus.NORMALIZED,
         metric_class=metric,
         value=magnitude,
         currency=currency,
         is_percentage=is_percentage,
     )
+
+
+def _reported_span(text: str, match: re.Match[str], scaled: bool) -> str:
+    """The figure exactly as written, and nothing around it.
+
+    Assembled from the parts the parser recognised — sign, currency symbol,
+    digits as punctuated, a scale word only when it really is one — plus a
+    trailing percent sign if the source wrote one. What it deliberately does
+    not include is the rest of the sentence, which is `evidence.content`'s job.
+    """
+    pieces: list[str] = []
+
+    sign = match.group("sign")
+    if sign and sign.strip() == "-":
+        pieces.append("-")
+
+    symbol = match.group("symbol")
+    if symbol:
+        pieces.append(symbol)
+
+    pieces.append(match.group("digits").strip())
+
+    if scaled:
+        pieces.append(match.group("scale"))
+
+    span = "".join(pieces)
+
+    tail = text[match.end() :]
+    if tail.startswith("%"):
+        span += "%"
+
+    return span
 
 
 def parse_period(raw: object) -> tuple[dt.date | None, dt.date | None]:

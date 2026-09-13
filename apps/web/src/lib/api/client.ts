@@ -160,3 +160,167 @@ export function ask(sessionId: string, question: string): Promise<AskResult> {
     body: JSON.stringify({ question }),
   });
 }
+
+/* -------------------------------------------------------------------------
+ * Uploads (`REQ-INPUT-004`, `REQ-DOC-001..003`, `REQ-DOC-010`)
+ * ---------------------------------------------------------------------- */
+
+export type UploadTicketRequest = Schemas["UploadTicketRequest"];
+export type UploadTicket = Schemas["UploadTicket"];
+export type Upload = Schemas["UploadOut"];
+export type UploadState = Upload["state"];
+
+/**
+ * What the browser is allowed to attach, and what to call each kind.
+ *
+ * Mirrors the server's allowlist so the file picker filters rather than
+ * offering everything and rejecting most of it. The server is still the
+ * authority: this list is a convenience, and `REQ-DOC-010 AC-1` is satisfied
+ * on the other side of the wire.
+ */
+export const ACCEPTED_UPLOAD_TYPES: Record<string, string> = {
+  "application/pdf": "PDF",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    "Word",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel",
+  "text/csv": "CSV",
+  "text/plain": "Text",
+  "text/markdown": "Markdown",
+};
+
+/** Extensions for the picker, since browsers report `.md` and `.csv` unevenly. */
+export const ACCEPTED_UPLOAD_EXTENSIONS =
+  ".pdf,.docx,.xlsx,.csv,.txt,.md,.markdown";
+
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/**
+ * The content type to declare for a file.
+ *
+ * Browsers report `text/markdown` as `text/plain` or as an empty string, and
+ * `.csv` as `application/vnd.ms-excel` on Windows. Rather than let the picker's
+ * guess decide, the extension picks among the text formats — the same rule the
+ * server applies to the bytes, so the two agree.
+ */
+export function declaredContentType(file: File): string {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+
+  if (extension === "md" || extension === "markdown") return "text/markdown";
+  if (extension === "csv") return "text/csv";
+  if (extension === "txt") return "text/plain";
+  if (extension === "pdf") return "application/pdf";
+  if (extension === "docx") {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  if (extension === "xlsx") {
+    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  }
+  return file.type;
+}
+
+/** Reserve a slot and get a URL to PUT one file to. */
+export function createUploadTicket(
+  sessionId: string,
+  body: UploadTicketRequest,
+): Promise<UploadTicket> {
+  return request<UploadTicket>(`/v1/research/${sessionId}/uploads`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * PUT the bytes straight to storage.
+ *
+ * Not through `request`: this does not go to our API at all (implementation
+ * plan §10), so it carries no credentials, expects no JSON envelope, and must
+ * send exactly the content type that was signed into the URL — a different one
+ * fails the signature check rather than storing a mislabelled object.
+ */
+export async function putToStorage(
+  ticket: UploadTicket,
+  file: File,
+): Promise<void> {
+  const response = await fetch(ticket.url, {
+    method: "PUT",
+    body: file,
+    headers: { "content-type": ticket.content_type },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      "upload_failed",
+      "That file could not be uploaded. Check your connection and try again.",
+    );
+  }
+}
+
+/** Tell the API the bytes are in place, so the worker can read them. */
+export function completeUpload(
+  sessionId: string,
+  uploadId: string,
+): Promise<Upload> {
+  return request<Upload>(
+    `/v1/research/${sessionId}/uploads/${uploadId}/complete`,
+    { method: "POST" },
+  );
+}
+
+/** Every file attached to a session, with its processing state. */
+export function listUploads(sessionId: string): Promise<Upload[]> {
+  return request<Upload[]>(`/v1/research/${sessionId}/uploads`);
+}
+
+/** Remove a file and its extracted text (`REQ-SEC-008 AC-2`). */
+export async function deleteUpload(
+  sessionId: string,
+  uploadId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/v1/research/${sessionId}/uploads/${uploadId}`,
+    { method: "DELETE", credentials: "include" },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      "delete_failed",
+      "That file could not be removed. Try again in a moment.",
+    );
+  }
+}
+
+/**
+ * Enqueue the run for a session created with `defer_start`.
+ *
+ * Idempotent on the server, so a retry after a dropped connection is safe.
+ */
+export function startResearch(
+  sessionId: string,
+): Promise<CreateResearchResponse> {
+  return request<CreateResearchResponse>(`/v1/research/${sessionId}/start`, {
+    method: "POST",
+  });
+}
+
+/**
+ * Attach one file end to end: presign, PUT, complete.
+ *
+ * Three calls rather than one because the middle one does not touch our API.
+ * Grouped here so no caller can do two of the three and leave a `pending` row
+ * pointing at bytes that never arrived.
+ */
+export async function attachFile(
+  sessionId: string,
+  file: File,
+): Promise<Upload> {
+  const ticket = await createUploadTicket(sessionId, {
+    filename: file.name,
+    content_type: declaredContentType(file),
+    size_bytes: file.size,
+  });
+
+  await putToStorage(ticket, file);
+  return completeUpload(sessionId, ticket.upload_id);
+}

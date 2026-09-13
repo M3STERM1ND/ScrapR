@@ -114,3 +114,49 @@ export function ArrowRight({ className = "" }: { className?: string }) {
     </svg>
   );
 }
+
+/**
+ * A document, drawn rather than typed.
+ *
+ * MASTER.md forbids emoji as icons, so this is inline SVG at the 1.5px stroke
+ * every other mark in the system uses.
+ */
+export function DocumentIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden
+      className={`h-3.5 w-3.5 ${className}`}
+    >
+      <path
+        d="M9 1.5H4.5A1.5 1.5 0 0 0 3 3v10a1.5 1.5 0 0 0 1.5 1.5h7A1.5 1.5 0 0 0 13 13V5.5L9 1.5Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9 1.5V5.5H13"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * The mark on a citation to something the reader uploaded (`REQ-DOC-008 AC-1`).
+ *
+ * "Your document", not "Document": the distinction the requirement is drawing
+ * is between material the reader supplied and material ScrapR went and found,
+ * and the possessive is what says that in two words.
+ */
+export function DocumentMark({ className = "" }: { className?: string }) {
+  return (
+    <span className={`document-mark ${className}`}>
+      <DocumentIcon />
+      Your document
+    </span>
+  );
+}

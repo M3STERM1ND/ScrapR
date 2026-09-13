@@ -384,6 +384,51 @@
   color: var(--color-ink);
 }
 
+/* ---- Uploaded documents (`REQ-DOC-008`, `REQ-DOC-003`) ---- */
+
+/* A citation to the reader's own file must be distinguishable at a glance from
+   one to something ScrapR found (`AC-1`). Signalled by a mark and a word, not
+   by a colour: the workspace already spends its two accent appearances on
+   confidence and conflict, and a third hue would break the one rule MASTER.md
+   is least willing to bend. */
+@utility document-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: var(--text-micro);
+  font-weight: 500;
+  color: var(--color-ink-soft);
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  padding: 0.0625rem 0.5rem;
+  white-space: nowrap;
+}
+
+/* The intake attachment list. A row per file, hairline separated, so a set of
+   attachments reads as part of the form rather than as a file manager. */
+@utility attachment-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--color-line);
+  padding: 0.75rem 0;
+}
+
+/* Processing state (`REQ-DOC-003 AC-1`). Three words, one per state, in the
+   same muted register as every other piece of metadata. A file that failed
+   says why on the next line rather than turning red: the reader needs to know
+   what to do about it, and a colour does not tell them. */
+@utility attachment-state {
+  font-size: var(--text-micro);
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@utility attachment-failed {
+  color: var(--color-ochre-deep);
+}
+
 /* ---- Activity ---- */
 
 @utility status-dot {

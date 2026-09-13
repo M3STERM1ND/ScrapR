@@ -6,6 +6,8 @@ import type {
   Version,
 } from "@/lib/api/client";
 
+import { DocumentMark } from "@/components/ui/primitives";
+
 import { Visualization } from "./Visualization";
 
 /**
@@ -326,6 +328,11 @@ function EvidenceDetail({
       <p className="text-micro text-ink-muted">
         {source ? (
           <>
+            {source.category === "document" ? (
+              <>
+                <DocumentMark />{" "}
+              </>
+            ) : null}
             {source.url ? (
               <a
                 href={source.url}
@@ -370,6 +377,12 @@ function EvidenceDetail({
  * The explanation appears when the evidence supports one (`REQ-EVID-013
  * AC-2`); when it does not, the block says unresolved in as many words
  * (`REQ-EVID-014 AC-1`) rather than inventing a reason.
+ *
+ * When one side came from a file the reader uploaded, that side is marked
+ * (`REQ-DOC-007 AC-2`). It is the most consequential thing about such a
+ * disagreement: "the web says 1.2bn and your board pack says 1.4bn" is a
+ * different problem from two outlets disagreeing, and it is usually the
+ * reader's to resolve.
  */
 function ConflictBlock({
   conflict,
@@ -402,6 +415,16 @@ function ConflictBlock({
                 {index === 0 ? "Primary value" : "Conflicting value"}:
               </span>{" "}
               <span className="tnum text-ink">{side.value}</span>
+              {/* `REQ-DOC-007 AC-2`: which side is the reader's own document.
+                  A reader looking at two numbers cannot weigh the disagreement
+                  until they know that one of them came out of their own file,
+                  and the filename alone does not say it plainly enough. */}
+              {side.from_your_document ? (
+                <>
+                  {" "}
+                  <DocumentMark />
+                </>
+              ) : null}
               {source ? (
                 <>
                   {", from "}
@@ -501,6 +524,11 @@ function Citation({ source }: { source: Source }) {
 
   return (
     <span className="inline-flex flex-wrap items-baseline gap-x-2">
+      {/* `REQ-DOC-008 AC-1`: a citation to the reader's own file is visibly
+          distinct from one to something ScrapR found. It leads the chip,
+          because that is the fact that changes how the rest of the line should
+          be read. */}
+      {source.category === "document" ? <DocumentMark /> : null}
       {source.url ? (
         <a
           href={source.url}

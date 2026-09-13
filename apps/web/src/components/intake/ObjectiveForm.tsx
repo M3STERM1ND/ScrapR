@@ -3,8 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
-import { ApiError, createResearch } from "@/lib/api/client";
+import {
+  ApiError,
+  attachFile,
+  createResearch,
+  listUploads,
+  startResearch,
+} from "@/lib/api/client";
 import { ArrowRight } from "@/components/ui/primitives";
+import { Attachments, type Attachment } from "./Attachments";
 
 /**
  * The intake form (`REQ-INPUT-001..006`).
@@ -16,6 +23,14 @@ import { ArrowRight } from "@/components/ui/primitives";
  *
  * Validation is client-side for the immediate feedback and server-side for the
  * truth; the server's message is what is displayed if the two ever disagree.
+ *
+ * **With documents attached, submitting is three steps rather than one**
+ * (`REQ-INPUT-004 AC-2`). The session is created without a run, the files are
+ * uploaded and read, and only then is the run enqueued. Starting first and
+ * uploading after would let retrieval reach the documents category while a file
+ * was still extracting, and the document would be quietly absent from a report
+ * it should have informed. Without documents nothing changes: one request, and
+ * the reader is in the workspace.
  */
 
 const OBJECTIVE_MIN = 10;
@@ -36,12 +51,18 @@ export function ObjectiveForm() {
   const [url, setUrl] = useState("");
   const [instructions, setInstructions] = useState("");
 
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+
   const [submitting, setSubmitting] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const sendable = attachments.filter((held) => held.problem === null);
+  const blocked = attachments.some((held) => held.problem !== null);
 
   const trimmed = objective.trim();
   const tooShort = trimmed.length > 0 && trimmed.length < OBJECTIVE_MIN;
-  const canSubmit = trimmed.length >= OBJECTIVE_MIN && !submitting;
+  const canSubmit = trimmed.length >= OBJECTIVE_MIN && !submitting && !blocked;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -57,7 +78,25 @@ export function ObjectiveForm() {
         context_company: company.trim() || null,
         context_url: url.trim() || null,
         context_ticker: null,
+        // No documents, no second round trip.
+        defer_start: sendable.length > 0,
       });
+
+      if (sendable.length > 0) {
+        for (const [index, held] of sendable.entries()) {
+          setProgress(
+            `Uploading ${held.file.name} (${index + 1} of ${sendable.length})`,
+          );
+          await attachFile(created.session_id, held.file);
+        }
+
+        setProgress("Reading your documents");
+        await waitForReading(created.session_id);
+
+        // Only now. The run must not start while a file is still extracting.
+        await startResearch(created.session_id);
+      }
+
       router.push(`/research/${created.session_id}`);
     } catch (cause) {
       // The API's message is the only text safe to show; anything else it knows
@@ -67,6 +106,7 @@ export function ObjectiveForm() {
           ? cause.message
           : "Could not reach the service. Check your connection and try again.",
       );
+      setProgress(null);
       setSubmitting(false);
     }
   }
@@ -139,6 +179,13 @@ export function ObjectiveForm() {
                 placeholder="Focus on the last two quarters."
               />
             </div>
+            <div className="sm:col-span-2">
+              <Attachments
+                files={attachments}
+                onChange={setAttachments}
+                disabled={submitting}
+              />
+            </div>
           </div>
         ) : null}
       </div>
@@ -158,11 +205,15 @@ export function ObjectiveForm() {
           disabled={!canSubmit}
           className="group inline-flex h-12 items-center justify-center gap-2 rounded-sm bg-ink px-6 text-small font-medium text-paper shadow-soft transition-[background-color,box-shadow,transform] duration-200 ease-out hover:bg-ochre-deep hover:shadow-lift active:translate-y-px disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-muted disabled:shadow-none"
         >
-          {submitting ? "Starting research" : "Start research"}
+          {submitting ? progress ?? "Starting research" : "Start research"}
           {submitting ? null : <ArrowRight />}
         </button>
         <p className="text-micro text-ink-muted">
-          No account needed. Research starts immediately.
+          {sendable.length > 0
+            ? `No account needed. ${sendable.length} ${
+                sendable.length === 1 ? "document" : "documents"
+              } will be read before research starts.`
+            : "No account needed. Research starts immediately."}
         </p>
       </div>
 
@@ -218,4 +269,31 @@ function Field({
       />
     </div>
   );
+}
+
+/**
+ * Wait until no attachment is still being read.
+ *
+ * Extraction happens in the worker, so the browser polls rather than being
+ * told. Bounded, because the alternative to giving up is a reader stuck on a
+ * spinner forever: if a file is still processing after this long, research
+ * starts without it and the workspace shows its state. A missing document with
+ * a visible reason beats a page that never moves.
+ *
+ * A `failed` upload does not block the start either. It is terminal, the
+ * reason is on the row, and holding research hostage to a corrupt PDF would be
+ * a worse answer than researching everything else.
+ */
+async function waitForReading(
+  sessionId: string,
+  { attempts = 40, everyMs = 750 }: { attempts?: number; everyMs?: number } = {},
+): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const uploads = await listUploads(sessionId);
+    const working = uploads.some(
+      (upload) => upload.state === "pending" || upload.state === "processing",
+    );
+    if (!working) return;
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+  }
 }

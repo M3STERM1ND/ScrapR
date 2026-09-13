@@ -3,15 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ActivityTimeline } from "@/components/activity/ActivityTimeline";
+import { AttachedDocuments } from "./AttachedDocuments";
 import { ConversationPanel } from "@/components/conversation/ConversationPanel";
 import { ReportView } from "@/components/report/ReportView";
 import {
   ApiError,
   getActivity,
+  listUploads,
   getResearch,
   getMessages,
   getVersion,
   type ActivityEvent,
+  type Upload,
   type Message,
   type ResearchSession,
   type Source,
@@ -47,6 +50,7 @@ export function Workspace({ sessionId }: Props) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [version, setVersion] = useState<Version | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [uploads, setUploads] = useState<Upload[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Refs, not state: the loop reads them on every tick, and re-rendering on a
@@ -67,13 +71,18 @@ export function Workspace({ sessionId }: Props) {
 
     const tick = async () => {
       try {
-        const [nextSession, page] = await Promise.all([
+        const [nextSession, page, attached] = await Promise.all([
           getResearch(sessionId),
           getActivity(sessionId, cursor.current),
+          // Polled with everything else rather than fetched once: a document
+          // can still be extracting when the workspace opens, and `REQ-DOC-003
+          // AC-2` wants the state visible as it changes, not as it was.
+          listUploads(sessionId),
         ]);
         if (stopped) return;
 
         setSession(nextSession);
+        setUploads(attached);
         setError(null);
 
         if (page.events.length > 0) {
@@ -181,6 +190,8 @@ export function Workspace({ sessionId }: Props) {
 
         <aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">
           <ActivityTimeline events={events} running={running} />
+          {/* `REQ-DOC-003 AC-3`: a failed upload does not silently vanish. */}
+          <AttachedDocuments uploads={uploads} />
           {error ? (
             <p className="mt-6 text-micro text-ink-muted">{error}</p>
           ) : null}

@@ -132,9 +132,10 @@ async def test_extractions_survive_the_grounding_check(
         await provider.complete_structured(INSTRUCTION, documents, Extraction)
     ).value
 
-    grounded = _ground(extraction, [item])
+    grounded, dropped = _ground(extraction, [item])
 
     assert len(grounded) == 1
+    assert not dropped
 
 
 async def test_an_empty_block_yields_no_evidence(provider: ScriptedProvider) -> None:

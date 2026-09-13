@@ -216,6 +216,23 @@ def compare(
             f"{left.currency} against {right.currency}, not converted",
         )
 
+    if bool(left.currency) != bool(right.currency):
+        # A money amount and a bare number are not the same kind of value,
+        # however their metric classes were inferred. This is the comparison
+        # that let $1.2bn revenue "disagree" with a 4.5-out-of-5 rating.
+        return ComparisonResult(
+            "non_comparable",
+            ConflictReason.CURRENCY,
+            "one value is a currency amount and the other is not",
+        )
+
+    if left.is_percentage != right.is_percentage:
+        return ComparisonResult(
+            "non_comparable",
+            ConflictReason.DEFINITION,
+            "one value is a percentage and the other is not",
+        )
+
     if left.metric_class is not right.metric_class:
         return ComparisonResult(
             "non_comparable",

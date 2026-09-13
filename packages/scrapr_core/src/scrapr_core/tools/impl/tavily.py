@@ -40,6 +40,7 @@ from scrapr_core.tools.impl.http_api import (
     api_item,
     classify_status,
     failure,
+    failure_detail,
 )
 
 __all__ = ["TAVILY_SEARCH_URL", "TavilyTool", "news_tool", "search_tool"]
@@ -64,6 +65,21 @@ def _published(raw: object) -> dt.datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.UTC)
 
 
+MAX_EXCLUDED_DOMAINS: Final = 20
+
+
+def _domains(raw: object) -> list[str]:
+    """A clean list of hostnames from a request parameter, or nothing."""
+    if not isinstance(raw, (list, tuple)):
+        return []
+    hosts = [
+        str(value).strip().lower()
+        for value in raw
+        if isinstance(value, str) and value.strip() and " " not in value.strip()
+    ]
+    return list(dict.fromkeys(hosts))[:MAX_EXCLUDED_DOMAINS]
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class TavilyTool:
@@ -81,7 +97,7 @@ class TavilyTool:
         if not query:
             return failure("not_found", "no query supplied", self.name, self.category)
 
-        payload = {
+        payload: dict[str, object] = {
             "api_key": self.api_key,
             "query": query,
             "topic": self.topic,
@@ -89,6 +105,11 @@ class TavilyTool:
             "search_depth": "basic",
             "include_raw_content": False,
         }
+        excluded = _domains(request.params.get("exclude_domains"))
+        if excluded:
+            # A follow-up round asking for sources the question does not have
+            # yet: the domains it already cites are what it must look past.
+            payload["exclude_domains"] = excluded
 
         client = self._client(request)
         async with client:
@@ -110,7 +131,9 @@ class TavilyTool:
             if kind is not None:
                 return failure(
                     kind,
-                    f"tavily returned {response.status_code}",
+                    failure_detail(
+                        TAVILY_SEARCH_URL, response, {"api_key": self.api_key}
+                    ),
                     self.name,
                     self.category,
                 )

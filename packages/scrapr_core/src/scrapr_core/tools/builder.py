@@ -5,20 +5,21 @@ keyed providers it becomes conditional, and five conditionals inline is where
 that function stops being readable — so it moves here, next to the registry it
 fills.
 
-**A category with no key does not register in production, and that is the
-designed behaviour.** `REQ-TOOL-009 AC-2` means the orchestrator asks for a
-category and never learns who answered; a category nothing serves returns
-`not_found`, the run reports the area as a gap, and the report names it.
-Degraded and stated, never silent — which is the same path an outage takes, so
-there is one behaviour to reason about rather than two.
+**A category with no key does not register, and that is the designed
+behaviour.** `REQ-TOOL-009 AC-2` means the orchestrator asks for a category and
+never learns who answered; a category nothing serves returns `not_found`, the
+run reports the area as a gap, and the report names it. Degraded and stated,
+never silent — which is the same path an outage takes, so there is one
+behaviour to reason about rather than two.
 
-**Outside production, an unserved category falls back to its fixture** — the
-same three-outcome shape `build_provider` uses for the model, and for the same
-reason. A developer without keys must still be able to run the pipeline, and
-the alternative is that every local run and every end-to-end test produces a
-failed version that looks like a research defect rather than an absent
-credential. Production never sees a fixture: serving canned items as retrieval
-would be the tool-layer equivalent of shipping the scripted provider.
+**Fixtures are an explicit opt-in, and never reach real research.** They used
+to fill every unserved category whenever the environment was not production.
+The first real run showed the cost: a real model read a canned "$1.2bn revenue"
+item on `reuters.com` and the report cited it as a Reuters filing about NVIDIA.
+Now a fixture registers only when `Settings.fixtures_permitted` — the
+`SCRAPR_ALLOW_FIXTURES` flag, outside production, with no real model configured.
+And a fixture never borrows a real publisher's name: it lives on the reserved
+`.invalid` host, tiers `LOWER`, and says what it is in its source name.
 
 **Page fetch always registers.** It needs no key (`REQ-TOOL-003`), so the one
 category that is never missing is the one that reads a specific page.
@@ -49,7 +50,7 @@ from scrapr_core.tools.impl.page_fetch import PageFetchTool
 from scrapr_core.tools.impl.tavily import news_tool, search_tool
 from scrapr_core.tools.registry import ToolRegistry
 
-__all__ = ["RegistryReport", "build_registry"]
+__all__ = ["FIXTURE_HOST", "RegistryReport", "build_registry"]
 
 
 @final
@@ -64,12 +65,16 @@ class RegistryReport:
 
     registered: tuple[str, ...]
     missing: tuple[ToolCategory, ...]
-    """Categories nothing serves. Production only — outside it these are
+    """Categories nothing serves. When fixtures are permitted these are
     stubbed instead, and a category is never in both."""
 
     stubbed: tuple[ToolCategory, ...] = ()
-    """Categories running on a fixture because no key was configured. Always
-    empty in production."""
+    """Categories running on a fixture because no key was configured. Empty
+    unless `Settings.fixtures_permitted`."""
+
+    fixtures_refused: bool = False
+    """`SCRAPR_ALLOW_FIXTURES` was set but ignored — production, or a real model
+    is configured. Reported so the flag cannot look like it did something."""
 
     @property
     def summary(self) -> str:
@@ -82,6 +87,11 @@ class RegistryReport:
             # Said loudly, because a local run that looks like research is
             # exactly what a stand-in must never be mistaken for.
             parts.append(f"FIXTURES (no key, not real research): {faked}")
+        if self.fixtures_refused:
+            parts.append(
+                "SCRAPR_ALLOW_FIXTURES ignored: fixtures never run beside a real "
+                "model or in production"
+            )
         if not self.missing and not self.stubbed:
             parts.append("every category served")
         return "; ".join(parts)
@@ -146,7 +156,7 @@ def build_registry(
     )
 
     stubbed: tuple[ToolCategory, ...] = ()
-    if settings.scrapr_env != "production":
+    if settings.fixtures_permitted:
         stubbed = unserved
         for category in unserved:
             add(_fixture_for(category))
@@ -157,37 +167,41 @@ def build_registry(
         registered=tuple(registered),
         missing=() if stubbed else unserved,
         stubbed=stubbed,
+        fixtures_refused=settings.allow_fixtures and not settings.fixtures_permitted,
     )
 
 
-def _fixture_for(category: ToolCategory) -> FixtureTool:
-    """A stand-in for one unserved category, local only.
+FIXTURE_HOST = "fixture.invalid"
+"""Where fixture items claim to come from.
 
-    Two distinct sources, because `MIN_SOURCES_PER_QUESTION` is two: a
-    one-source fixture would leave every question open and make a local run
-    look like a research failure rather than a missing credential — which is
-    the exact confusion this fallback exists to prevent.
+`.invalid` is reserved (RFC 2606) and can never resolve, so no real publisher's
+name is borrowed and no reader can follow a citation to a page that looks
+real. Unlisted, so `DEC-08` tiers it `LOWER` — a fixture is never authority.
+"""
+
+
+def _fixture_for(category: ToolCategory) -> FixtureTool:
+    """A stand-in for one unserved category, for keyless local plumbing only.
+
+    Every piece of it says what it is: the host, the source name and the text.
+    A fixture that reads like research is how canned figures became a report's
+    headline numbers.
     """
-    # An allowlisted host, because `DEC-08` tiers on it: a fixture on an
-    # unlisted domain is `LOWER`, never resolves a question, and would make
-    # every keyless local run look like a research failure — the exact
-    # confusion this fallback exists to prevent.
-    host = "reuters.com"
     return FixtureTool(
         name=f"fixture_{category.value}",
         category=category,
         items=tuple(
             fixture_item(
-                source_name=f"{host} {category.value} result {index + 1}",
+                source_name=f"FIXTURE {category.value} placeholder {index + 1} (not real research)",
                 text=body,
-                source_url=f"https://{host}/{category.value}/{index + 1}",
+                source_url=f"https://{FIXTURE_HOST}/{category.value}/{index + 1}",
             )
             for index, body in enumerate(
                 (
-                    "The company reported $1.2bn revenue for FY2025, up 18% "
-                    "year over year.",
-                    "Hiring continued through the fourth quarter, with 40 open "
-                    "engineering roles listed.",
+                    "FIXTURE PLACEHOLDER: a fictional example company reported "
+                    "$1.2bn revenue for FY2025. This is not real data.",
+                    "FIXTURE PLACEHOLDER: a fictional example company listed 40 "
+                    "open engineering roles. This is not real data.",
                 )
             )
         ),

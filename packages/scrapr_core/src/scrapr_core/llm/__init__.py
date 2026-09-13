@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from scrapr_core.llm.anthropic_provider import (
     AnthropicProvider,
+    ProviderOutputTruncated,
     ProviderRefusal,
     TierProfile,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "LLMProvider",
     "ModelTier",
     "NoCannedResponseError",
+    "ProviderOutputTruncated",
     "ProviderRefusal",
     "RecordedCall",
     "StructuredResult",

@@ -176,4 +176,15 @@ class ToolInvocation(Base):
     """The host a call concerned, when it named one, so paywalled, blocked and
     unreachable outcomes can be counted per domain (`REQ-OBS-006`)."""
 
+    result_items: Mapped[int | None]
+    """How many items a successful call returned. A success with zero items and
+    a success with ten whose evidence was all dropped are different defects,
+    and without this they are one indistinguishable `success` row."""
+
+    error_detail: Mapped[str | None]
+    """The provider's own words for a failure, clipped and with query strings
+    and credentials removed. `error_kind` says a call was `blocked`; this says
+    why — "legacy endpoint", "invalid API key", "plan does not include" — which
+    is the difference between a config fix and a guess."""
+
     created_at: Mapped[CreatedAt]

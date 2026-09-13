@@ -279,6 +279,13 @@ class JobRunner:
         timings[step.stage] = int(timings.get(step.stage, 0)) + elapsed_ms
         effort["stage_ms"] = timings
         effort["tool_calls"] = int(effort.get("tool_calls", 0)) + ledger.tool_calls
+        if ledger.retrieval:
+            # Items returned, evidence grounded and dropped by reason, summed
+            # across attempts like everything else here.
+            retrieval = dict(effort.get("retrieval") or {})
+            for name, value in ledger.retrieval.items():
+                retrieval[name] = int(retrieval.get(name, 0)) + value
+            effort["retrieval"] = retrieval
         run.effort_used = effort
 
     def _mark_started(self, session: Session, run: ResearchRun) -> None:

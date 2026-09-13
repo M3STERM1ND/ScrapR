@@ -32,6 +32,7 @@ from scrapr_core.tools.impl import FixtureTool, fixture_item
 
 __all__ = [
     "DISPUTED",
+    "PERIOD_SPLIT",
     "REVENUE_EXCERPT",
     "REVENUE_TEXT",
     "cite_everything",
@@ -286,7 +287,17 @@ def disputed_registry() -> ToolRegistry:
     return registry
 
 
-def disputing_provider() -> FakeLLMProvider:
+PERIOD_SPLIT = (
+    "Acme Corp reported revenue of USD 1.2bn for fiscal 2024.",
+    "Acme Corp reported revenue of USD 1.9bn for fiscal 2025.",
+)
+"""The same metric in two different years, as `period_split_registry` publishes
+it. Its extraction must say 2024 for the first item: a statement claiming
+fiscal 2025 for a source that says 2024 is refused by extraction's figure
+check, and a test built on it would pass with one row instead of two."""
+
+
+def disputing_provider(statements: Sequence[str] = DISPUTED) -> FakeLLMProvider:
     """A provider that extracts both figures rather than the standing pair.
 
     `scripted_provider` carries a fixed standing extraction, so whatever a
@@ -294,17 +305,20 @@ def disputing_provider() -> FakeLLMProvider:
     grounding check drops anything else. Conflict detection compares the
     numbers *in the evidence*, so exercising it needs extraction that actually
     reads the disputed figures.
+
+    `statements` must say what the fixture's items say, figures and years
+    included — pass `PERIOD_SPLIT` alongside `period_split_registry`.
     """
     provider = FakeLLMProvider(
         standing_response=Extraction(
             evidence=[
                 ExtractedEvidence(
-                    statement=DISPUTED[0],
+                    statement=statements[0],
                     excerpt="revenue of USD 1.2bn",
                     item_index=0,
                 ),
                 ExtractedEvidence(
-                    statement=DISPUTED[1],
+                    statement=statements[1],
                     excerpt="revenue of USD 1.9bn",
                     item_index=1,
                 ),
@@ -368,13 +382,13 @@ def period_split_registry() -> ToolRegistry:
             items=(
                 fixture_item(
                     source_name="reuters.com FY2024",
-                    text="Acme Corp reported revenue of USD 1.2bn for fiscal 2024.",
+                    text=PERIOD_SPLIT[0],
                     source_url="https://reuters.com/acme/fy2024",
                     structured={"period": "2024", "currency": "USD", "basis": "reported"},
                 ),
                 fixture_item(
                     source_name="reuters.com FY2025",
-                    text="Acme Corp reported revenue of USD 1.9bn for fiscal 2025.",
+                    text=PERIOD_SPLIT[1],
                     source_url="https://reuters.com/acme/fy2025",
                     structured={"period": "2025", "currency": "USD", "basis": "reported"},
                 ),

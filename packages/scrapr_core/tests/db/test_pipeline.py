@@ -14,7 +14,7 @@ question cannot be answered, and when nothing could be found at all.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from uuid import UUID
 
 import pytest
@@ -26,6 +26,7 @@ from pipeline_support import (
     scripted_provider,
     search_tool,
 )
+from pydantic import BaseModel
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -33,6 +34,8 @@ from scrapr_core.db.enums import (
     ActivityStatus,
     ClaimType,
     ResearchStatus,
+    RunStatus,
+    StepStatus,
 )
 from scrapr_core.db.models import (
     Base,
@@ -41,6 +44,7 @@ from scrapr_core.db.models import (
     QuestionState,
     ReportSection,
     ResearchQuestion,
+    ResearchRun,
     ResearchSession,
     Source,
 )
@@ -51,8 +55,12 @@ from scrapr_core.db.repositories import (
     RunRepository,
 )
 from scrapr_core.domain.ownership import OwnerContext
-from scrapr_core.llm import FakeLLMProvider
-from scrapr_core.orchestrator.pipeline import STAGES
+from scrapr_core.jobs import JobRunner
+from scrapr_core.llm import FakeLLMProvider, ProviderOutputTruncated
+from scrapr_core.llm.contract import ModelTier, StructuredResult, TokenUsage, UntrustedDocument
+from scrapr_core.orchestrator.pipeline import STAGES, build_handlers
+from scrapr_core.orchestrator.synthesize import SynthesisDraft
+from scrapr_core.security.trust import Trusted
 from scrapr_core.synthesis import validate_version
 from scrapr_core.tools import ToolCategory, ToolRegistry
 from scrapr_core.tools.impl import FailingFixtureTool
@@ -386,3 +394,76 @@ async def test_a_failed_area_is_named_in_the_report(
     gap_claim = next(c for c in claims if c.text in named)
     assert gap_claim.id in summary_claims
     assert gap_claim.is_important
+
+
+class TruncatingSynthesis(FakeLLMProvider):
+    """Interprets, plans and extracts as scripted; runs out of room writing the
+    report, the way the NVIDIA run did."""
+
+    USAGE = TokenUsage(input_tokens=52_000, output_tokens=64_000, cost_micros=744_000)
+
+    def __init__(self, scripted: FakeLLMProvider) -> None:
+        super().__init__(standing_response=scripted._standing)
+        self.enqueue(*scripted._responses)
+        self.synthesis_calls = 0
+
+    async def complete_structured[T: BaseModel](
+        self,
+        instruction: Trusted,
+        untrusted: Sequence[UntrustedDocument],
+        schema: type[T],
+        model_tier: ModelTier = ModelTier.STANDARD,
+    ) -> StructuredResult[T]:
+        if schema is not SynthesisDraft:
+            return await super().complete_structured(instruction, untrusted, schema, model_tier)
+        self.synthesis_calls += 1
+        raise ProviderOutputTruncated(
+            "claude-sonnet-5 exhausted max_tokens=64000 writing SynthesisDraft, "
+            "before starting it (64000 output tokens)",
+            model="claude-sonnet-5",
+            tier=model_tier,
+            usage=self.USAGE,
+        )
+
+
+async def test_truncated_synthesis_fails_once_and_permanently(
+    session_factory: sessionmaker[Session], registry: ToolRegistry
+) -> None:
+    """The same evidence would exhaust the same allowance again, so the step is
+    poisoned on its first attempt instead of spending the tokens three times —
+    and the error says the output was truncated, not that the model refused."""
+    session_id = start_research(session_factory)
+    provider = TruncatingSynthesis(provider_for())
+
+    await run_pipeline(session_factory, registry, provider)
+    retry = JobRunner(session_factory, build_handlers(provider, registry), worker_id="retry")
+    found_more = await retry.run_one()
+
+    assert provider.synthesis_calls == 1
+    assert not found_more, "a truncated synthesis was left runnable"
+
+    with session_factory() as session:
+        run = session.execute(
+            select(ResearchRun).where(ResearchRun.session_id == session_id)
+        ).scalar_one()
+        synthesize = next(
+            step for step in RunRepository(session).steps(run.id) if step.stage == "synthesize"
+        )
+
+        assert synthesize.status is StepStatus.DEAD
+        assert synthesize.attempt == 1
+        assert synthesize.error is not None
+        assert synthesize.error.startswith("synthesis output truncated: ")
+        assert "ProviderRefusal" not in synthesize.error
+
+        assert run.status is RunStatus.FAILED
+        assert run.failure_stage == "synthesize"
+        assert run.failure_kind == "permanent"
+        # The tokens the model spent are on the run's books even though no
+        # report came of them.
+        assert run.tokens["by_stage"]["synthesize"]["output_tokens"] == 64_000
+
+        # Nothing half-written reached the report.
+        assert not session.execute(
+            select(ReportSection).where(ReportSection.version_id == run.version_id)
+        ).scalars().all()

@@ -510,3 +510,219 @@ def test_the_payloads_here_are_shaped_like_the_real_ones() -> None:
     assert ":" in str(EDGAR_BODY["hits"]["hits"][0]["_id"])
     assert "calendarYear" in STATEMENT and "reportedCurrency" in STATEMENT
     assert "salary_is_predicted" in posting()
+    assert "fiscalYear" in STABLE_STATEMENT and "filingDate" in STABLE_STATEMENT
+
+
+# --------------------------------------------------------------------------
+# The first real run — FMP's endpoint, structured queries, diagnosable failures
+# --------------------------------------------------------------------------
+
+STABLE_STATEMENT = {
+    "date": "2025-01-26",
+    "symbol": "NVDA",
+    "reportedCurrency": "USD",
+    "fiscalYear": "2025",
+    "period": "FY",
+    "filingDate": "2025-02-26",
+    "revenue": 130_497_000_000,
+    "grossProfit": 97_858_000_000,
+    "operatingIncome": 81_453_000_000,
+    "netIncome": 72_880_000_000,
+}
+
+STABLE_QUOTE = [
+    {
+        "symbol": "NVDA",
+        "name": "NVIDIA Corporation",
+        "price": 181.23,
+        "marketCap": 4_419_000_000_000,
+        "exchange": "NASDAQ",
+        "timestamp": 1_789_300_000,
+    }
+]
+
+LEGACY_403 = {
+    "Error Message": "Legacy Endpoint : Due to Legacy endpoints being no longer "
+    "supported - This endpoint is only available for legacy users who have valid "
+    "subscriptions prior August 31, 2025."
+}
+
+
+def stable_fmp(
+    seen: list[httpx.Request], quote_status: int = 200
+) -> Callable[[ToolRequest], httpx.AsyncClient]:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        path = request.url.path
+        if not path.startswith("/stable/"):
+            return httpx.Response(403, json=LEGACY_403)
+        if path.endswith("/search-name") or path.endswith("/search-symbol"):
+            return httpx.Response(200, json=[{"symbol": "NVDA", "exchange": "NASDAQ"}])
+        if path.endswith("/income-statement"):
+            return httpx.Response(200, json=[STABLE_STATEMENT])
+        if path.endswith("/quote"):
+            if quote_status != 200:
+                return httpx.Response(quote_status, json={"Error Message": "Premium endpoint"})
+            return httpx.Response(200, json=STABLE_QUOTE)
+        return httpx.Response(404, json={})
+
+    return factory(handler)
+
+
+def structured_ask(category: ToolCategory, **params: str) -> ToolRequest:
+    return ToolRequest(
+        category=category, params=params, budget=ToolBudget(timeout_seconds=5.0, max_results=5)
+    )
+
+
+async def test_fmp_calls_the_stable_api_with_the_known_ticker() -> None:
+    """The legacy `/api/v3/` endpoints answer 403 for current keys. A known
+    ticker is used as-is: no name search, and never the research question."""
+    seen: list[httpx.Request] = []
+    tool = FinancialModelingPrepTool(api_key="secret-key", client_factory=stable_fmp(seen))
+
+    outcome = await tool.invoke(structured_ask(ToolCategory.FINANCIAL, query="NVIDIA", symbol="NVDA"))
+
+    assert isinstance(outcome, ToolResult)
+    assert all(request.url.path.startswith("/stable/") for request in seen)
+    assert not any("search" in request.url.path for request in seen)
+    assert {request.url.params.get("symbol") for request in seen} == {"NVDA"}
+
+
+async def test_fmp_reads_the_stable_statement_and_the_quote() -> None:
+    seen: list[httpx.Request] = []
+    tool = FinancialModelingPrepTool(api_key="k", client_factory=stable_fmp(seen))
+
+    outcome = await tool.invoke(structured_ask(ToolCategory.FINANCIAL, query="NVIDIA", symbol="NVDA"))
+
+    assert isinstance(outcome, ToolResult)
+    statement, quote = outcome.items
+    assert statement.structured is not None and statement.structured["period"] == "2025"
+    assert statement.published_at is not None  # `filingDate`, not `fillingDate`
+    assert "Revenue: 130,497,000,000." in statement.content.text
+    assert quote.source_identifier is not None and ":quote:" in quote.source_identifier
+    assert "market capitalization was 4,419,000,000,000 USD" in quote.content.text
+    assert quote.structured is not None and quote.structured["currency"] == "USD"
+
+
+async def test_fmp_resolves_a_company_name_when_no_ticker_is_known() -> None:
+    seen: list[httpx.Request] = []
+    tool = FinancialModelingPrepTool(api_key="k", client_factory=stable_fmp(seen))
+
+    outcome = await tool.invoke(structured_ask(ToolCategory.FINANCIAL, query="NVIDIA"))
+
+    assert isinstance(outcome, ToolResult)
+    assert seen[0].url.path == "/stable/search-name"
+    assert seen[0].url.params["query"] == "NVIDIA"
+
+
+async def test_a_quote_the_plan_does_not_include_keeps_the_statements() -> None:
+    """Graceful degradation: one read refused is not the whole call refused."""
+    tool = FinancialModelingPrepTool(api_key="k", client_factory=stable_fmp([], quote_status=402))
+
+    outcome = await tool.invoke(structured_ask(ToolCategory.FINANCIAL, query="NVIDIA", symbol="NVDA"))
+
+    assert isinstance(outcome, ToolResult)
+    assert len(outcome.items) == 1
+    assert outcome.items[0].structured is not None
+    assert outcome.items[0].structured["period"] == "2025"
+
+
+async def test_a_403_says_why_and_never_repeats_the_key() -> None:
+    """The first run recorded "returned 403" and nothing else. The provider's
+    reason is the difference between a config fix and a guess."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={**LEGACY_403, "echo": "apikey=secret-key"})
+
+    tool = FinancialModelingPrepTool(api_key="secret-key", client_factory=factory(handler))
+
+    outcome = await tool.invoke(structured_ask(ToolCategory.FINANCIAL, query="NVIDIA", symbol="NVDA"))
+
+    assert isinstance(outcome, ToolFailure)
+    assert outcome.kind == "blocked"
+    assert "Legacy Endpoint" in outcome.message
+    assert "secret-key" not in outcome.message
+
+
+async def test_edgar_searches_the_company_and_keeps_only_its_filings() -> None:
+    """Full-text search matches any filing that mentions the company. A
+    supplier's 10-K naming NVIDIA is not NVIDIA's filing."""
+    seen: list[httpx.Request] = []
+    other = {
+        "_id": "0000999999-26-000001:supplier-10k.htm",
+        "_source": {
+            "display_names": ["Supplier Inc (SUPP)"],
+            "ciks": ["0000999999"],
+            "root_form": "10-K",
+            "file_date": "2026-02-01",
+        },
+    }
+    own = {
+        "_id": "0001045810-25-000023:nvda-20250126.htm",
+        "_source": {
+            "display_names": ["NVIDIA CORP (NVDA) (CIK 0001045810)"],
+            "ciks": ["0001045810"],
+            "root_form": "10-K",
+            "file_date": "2025-02-26",
+            "period_ending": "2025-01-26",
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"hits": {"hits": [other, own]}})
+
+    tool = SecEdgarTool(user_agent="ua (dev@example.com)", client_factory=factory(handler))
+
+    outcome = await tool.invoke(structured_ask(ToolCategory.FILINGS, query="NVIDIA", symbol="NVDA"))
+
+    assert isinstance(outcome, ToolResult)
+    assert seen[0].url.params["q"] == '"NVIDIA"'
+    assert [item.source_identifier for item in outcome.items] == ["edgar:000104581025000023"]
+
+
+async def test_adzuna_searches_for_the_employer_it_is_given() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"results": [posting()]})
+
+    tool = AdzunaTool(app_id="i", app_key="k", client_factory=factory(handler))
+    await tool.invoke(structured_ask(ToolCategory.JOBS, query="NVIDIA"))
+
+    assert seen[0].url.params["what"] == "NVIDIA"
+
+
+async def test_tavily_passes_domains_to_look_past() -> None:
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=TAVILY_BODY)
+
+    tool = search_tool("k", client_factory=factory(handler))
+    await tool.invoke(
+        ToolRequest(
+            category=ToolCategory.WEB_SEARCH,
+            params={"query": "NVIDIA revenue", "exclude_domains": ["glassdoor.com", "bad value"]},
+        )
+    )
+
+    assert bodies[0]["exclude_domains"] == ["glassdoor.com"]
+
+
+def test_failure_detail_redaction_for_the_operator_table() -> None:
+    from scrapr_core.observability.telemetry import redact_detail
+
+    message = (
+        "fmp_financial raised ConnectError: https://financialmodelingprep.com/stable/quote"
+        "?symbol=NVDA&apikey=secret-key failed; app_key=abc123"
+    )
+
+    cleaned = redact_detail(message)
+
+    assert "secret-key" not in cleaned
+    assert "abc123" not in cleaned
+    assert "financialmodelingprep.com/stable/quote" in cleaned

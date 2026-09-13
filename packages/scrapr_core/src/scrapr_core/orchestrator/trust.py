@@ -45,6 +45,8 @@ from scrapr_core.db.models import (
     Conflict,
     ConflictEvidence,
     Evidence,
+    ResearchSession,
+    ResearchVersion,
     Source,
 )
 from scrapr_core.evidence.confidence import ConfidenceInputs, assess
@@ -56,7 +58,18 @@ from scrapr_core.evidence.conflict import (
     is_stale,
 )
 from scrapr_core.evidence.dedupe import content_fingerprint
-from scrapr_core.evidence.normalize import MetricClass, NormalizedValue, classify_metric
+from scrapr_core.evidence.identity import (
+    MeasurementIdentity,
+    identify,
+    mismatch,
+    subject_aliases,
+)
+from scrapr_core.evidence.normalize import (
+    MetricClass,
+    NormalizedValue,
+    classify_statement,
+    normalize_value,
+)
 
 __all__ = ["apply_trust"]
 
@@ -89,21 +102,33 @@ class _Cited:
     def normalized(self) -> NormalizedValue:
         """The stored normalisation, rebuilt as a comparison input.
 
-        Read back from the row rather than recomputed from the text: the value
-        was normalised once at insert, and recomputing it here could disagree
-        with what the citation panel shows the reader.
+        The value and currency are read back from the row rather than
+        recomputed: they were normalised once at insert, and recomputing them
+        here could disagree with what the citation panel shows the reader.
+        Class and percentage are properties of the figure's text, which is
+        also stored, so they are derived from it the same way insert did.
         """
         return NormalizedValue(
             reported=self.evidence.value_raw or self.evidence.content,
             status=self.evidence.normalization,
-            metric_class=classify_metric(self.evidence.content),
+            metric_class=classify_statement(self.evidence.content),
             value=self.evidence.value_normalized,
             currency=self.evidence.currency,
+            is_percentage=normalize_value(self.evidence.content).is_percentage,
         )
 
     @property
     def metric(self) -> MetricClass:
-        return classify_metric(self.evidence.content)
+        return classify_statement(self.evidence.content)
+
+    def identity(self, aliases: frozenset[str]) -> MeasurementIdentity:
+        """Subject, metric and period of the cited figure (`evidence.identity`)."""
+        return identify(
+            self.evidence.content,
+            aliases=aliases,
+            period_end=self.evidence.period_end,
+            period_start=self.evidence.period_start,
+        )
 
     @property
     def basis(self) -> str | None:
@@ -115,33 +140,30 @@ class _Cited:
         return self.evidence.value_basis
 
     @property
-    def period(self) -> str | None:
-        """The fiscal period this figure covers, as a comparison key.
-
-        `DEC-10 §4.1` compares only within a period, so this is what stops
-        FY2024 revenue being reported as disagreeing with FY2025 revenue. A
-        value with no period returns `None`, which the comparison reads as
-        "cannot be excluded on period" rather than as a match.
-        """
-        if self.evidence.period_end is not None:
-            return self.evidence.period_end.isoformat()
-        if self.evidence.period_start is not None:
-            return self.evidence.period_start.isoformat()
-        return None
-
-    @property
     def fingerprint(self) -> str:
         return content_fingerprint(self.evidence.excerpt or self.evidence.content)
 
 
 def apply_trust(session: Session, version_id: UUID) -> None:
     """Detect conflicts and assign confidence for every claim in a version."""
+    aliases = _subject_aliases(session, version_id)
     for claim in _claims(session, version_id):
         cited = _cited_for(session, claim.id)
-        conflicts = _detect(session, version_id, claim, cited)
+        conflicts = _detect(session, version_id, claim, cited, aliases)
         _assign_confidence(claim, cited, conflicts)
 
     session.flush()
+
+
+def _subject_aliases(session: Session, version_id: UUID) -> frozenset[str]:
+    """How the research subject may be named, from what its session recorded."""
+    version = session.get(ResearchVersion, version_id)
+    research = session.get(ResearchSession, version.session_id) if version else None
+    if research is None:
+        return frozenset()
+    return subject_aliases(
+        research.subject, research.context_company, research.context_ticker
+    )
 
 
 # --------------------------------------------------------------------------
@@ -171,12 +193,18 @@ def _detect(
     version_id: UUID,
     claim: Claim,
     cited: Sequence[_Cited],
+    aliases: frozenset[str] = frozenset(),
 ) -> list[ComparisonResult]:
-    """Compare every pair of cited values, and record the disagreements.
+    """Compare every pair of cited values that measure the same thing.
 
     Pairwise, because `DEC-10 §10` leaves three-way disagreement to the
     explanation work: whether three values spanning a range are one conflict or
     three is a presentation question this layer should not decide.
+
+    **Only measurements of one subject, one metric and one period are
+    compared** (`evidence.identity`). A claim routinely cites evidence about
+    different things — an analysis citing revenue and an employee rating — and
+    comparing those pairs is how "$1.2bn" came to disagree with "4.5".
 
     Evidence from syndicated copies of one story is compared only once — three
     outlets carrying one wire story is one story, and `REQ-EVID-006 AC-2`
@@ -196,11 +224,16 @@ def _detect(
             continue
         seen_pairs.add((first, second))
 
+        left_identity = left.identity(aliases)
+        right_identity = right.identity(aliases)
+        if mismatch(left_identity, right_identity) is not None:
+            continue
+
         outcome = compare(
             left.normalized,
             right.normalized,
-            left_period=left.period,
-            right_period=right.period,
+            left_period=left_identity.period,
+            right_period=right_identity.period,
             left_basis=left.basis,
             right_basis=right.basis,
         )

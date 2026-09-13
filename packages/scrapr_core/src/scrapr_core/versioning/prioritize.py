@@ -26,7 +26,7 @@ from enum import IntEnum, unique
 from typing import Final, final
 
 from scrapr_core.evidence.conflict import is_stale
-from scrapr_core.evidence.normalize import classify_metric
+from scrapr_core.evidence.normalize import classify_statement
 
 __all__ = [
     "AreaHistory",
@@ -88,7 +88,7 @@ def _stale_count(area: AreaHistory, now: dt.datetime) -> int:
     published as.
     """
     return sum(
-        is_stale(item.published_at or item.retrieved_at, classify_metric(item.content), now=now)
+        is_stale(item.published_at or item.retrieved_at, classify_statement(item.content), now=now)
         for item in area.evidence
     )
 

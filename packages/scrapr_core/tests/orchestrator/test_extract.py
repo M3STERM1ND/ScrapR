@@ -20,6 +20,7 @@ from scrapr_core.orchestrator.extract import (
     ExtractedEvidence,
     Extraction,
     extract_from_items,
+    extract_with_report,
 )
 from scrapr_core.security.trust import SourceRef, Untrusted
 from scrapr_core.tools.contract import ToolItem
@@ -146,7 +147,9 @@ async def test_extraction_per_item_is_bounded() -> None:
     """Discrete evidence, not a transcription of the page."""
     provider = FakeLLMProvider()
     provider.enqueue(
-        extraction(*[(f"Fact {n}", "revenue of $1.2bn", 0) for n in range(20)])
+        # Statements without figures of their own: the cap is under test here,
+        # not the figure check, which would refuse "Fact 7" against this page.
+        extraction(*[(f"Revenue fact {chr(65 + n)}", "revenue of $1.2bn", 0) for n in range(20)])
     )
 
     evidence = await extract_from_items([item()], QUESTION, provider)
@@ -238,3 +241,131 @@ async def test_extraction_runs_at_the_cheap_tier() -> None:
     await extract_from_items([item()], QUESTION, provider)
 
     assert provider.calls[0].tier is ModelTier.CHEAP
+
+
+# --------------------------------------------------------------------------
+# Block numbering — the first real run's evidence loss
+# --------------------------------------------------------------------------
+
+
+def tavily_items(count: int = 10) -> list[ToolItem]:
+    """A page of Tavily results: short snippets, one fact each."""
+    return [
+        item(
+            text=f"Snippet {chr(65 + index)}: NVIDIA's rival number {chr(65 + index)} "
+            "trails it in data center accelerators.",
+            url=f"https://news{index}.example/nvidia",
+        )
+        for index in range(count)
+    ]
+
+
+async def test_the_number_in_the_envelope_is_the_item_index() -> None:
+    """The question used to be `#1`, so the first result was `#2` while the
+    schema asked for `0`. Now the header a model reads and the index it returns
+    are the same number."""
+    provider = FakeLLMProvider()
+    provider.enqueue(Extraction())
+
+    await extract_from_items(tavily_items(3), QUESTION, provider)
+
+    rendered = provider.calls[0].rendered
+    assert " #question label='question to answer'" in rendered
+    for index in range(3):
+        assert f" #{index} label='block {index}: " in rendered
+    assert " #3 " not in rendered
+
+
+async def test_a_model_citing_the_block_number_it_sees_is_grounded() -> None:
+    """The regression itself: a model answering with the number printed in
+    each block's header. Before the fix every one of these was checked against
+    the block two positions later, and the last two were out of range."""
+    items = tavily_items(8)
+    provider = FakeLLMProvider()
+    provider.enqueue(
+        extraction(
+            *[
+                (f"Rival {chr(65 + index)} trails NVIDIA.", f"rival number {chr(65 + index)} trails it", index)
+                for index in range(8)
+            ]
+        )
+    )
+
+    outcome = await extract_with_report(items, QUESTION, provider)
+
+    assert len(outcome.evidence) == 8
+    assert [found.item.source_url for found in outcome.evidence] == [i.source_url for i in items]
+    assert outcome.report.dropped == {}
+
+
+async def test_the_report_accounts_for_every_candidate() -> None:
+    blocked = item(url="https://pay.example", accessibility=Accessibility.PAYWALLED)
+    provider = FakeLLMProvider()
+    provider.enqueue(
+        extraction(
+            ("Acme reported $1.2bn revenue.", "revenue of $1.2bn", 0),
+            ("Acme reported $9.9bn revenue.", "revenue of $9.9bn", 0),
+            ("Something.", "revenue of $1.2bn", 5),
+        )
+    )
+
+    outcome = await extract_with_report([item(), blocked], QUESTION, provider)
+
+    report = outcome.report
+    assert report.items_returned == 2
+    assert report.items_unreadable == 1
+    assert report.candidates == 3
+    assert report.grounded == 1
+    assert report.dropped == {"excerpt_not_in_source": 1, "out_of_range": 1}
+    assert report.dropped_total == 2
+
+
+# --------------------------------------------------------------------------
+# Statements may not add figures — validation is stricter, never looser
+# --------------------------------------------------------------------------
+
+
+async def test_a_statement_inventing_a_figure_is_dropped() -> None:
+    """The excerpt is real; the statement beside it adds a number the source
+    never printed. Synthesis reads the statement, so it would carry the
+    invention into the report."""
+    provider = FakeLLMProvider()
+    provider.enqueue(extraction(("Acme reported $1.4bn revenue.", "revenue of $1.2bn", 0)))
+
+    outcome = await extract_with_report([item()], QUESTION, provider)
+
+    assert outcome.evidence == []
+    assert outcome.report.dropped == {"unsupported_figure": 1}
+
+
+async def test_a_statement_inventing_a_year_is_dropped() -> None:
+    """The fixture that became NVIDIA's revenue said nothing about which
+    company; a statement adding a period its source lacks is the same move."""
+    page = item(text="The company reported revenue of $1.2bn, up 18%.")
+    provider = FakeLLMProvider()
+    provider.enqueue(extraction(("It reported $1.2bn revenue for FY2024.", "revenue of $1.2bn", 0)))
+
+    assert await extract_from_items([page], QUESTION, provider) == []
+
+
+async def test_restating_scale_is_not_inventing_a_figure() -> None:
+    provider = FakeLLMProvider()
+    provider.enqueue(
+        extraction(("Acme reported revenue of $1,200 million in fiscal 2025, up 18 percent.", "revenue of $1.2bn", 0))
+    )
+
+    assert len(await extract_from_items([item()], QUESTION, provider)) == 1
+
+
+async def test_the_excerpt_is_never_reattributed_to_another_block() -> None:
+    """Grounding is not loosened to rescue evidence: an excerpt claimed for the
+    wrong block is dropped, not moved to the block that happens to contain it."""
+    first = item(text="Beta revenue grew 18%.", url="https://beta.example")
+    second = item(text="Acme hired 40 engineers.", url="https://acme.example")
+    provider = FakeLLMProvider()
+    provider.enqueue(extraction(("Acme revenue grew 18%.", "revenue grew 18%", 1)))
+
+    outcome = await extract_with_report([first, second], QUESTION, provider)
+
+    assert outcome.evidence == []
+    assert outcome.report.dropped == {"excerpt_not_in_source": 1}

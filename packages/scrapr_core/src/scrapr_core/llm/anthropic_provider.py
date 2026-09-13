@@ -20,6 +20,23 @@ rather than one request builder with flags:
 Sending the wrong one is a 400 at runtime, so the profile carries what each
 model actually accepts instead of the call site remembering.
 
+**`max_tokens` is shared between thinking and the answer.** Adaptive thinking
+spends from the same allowance the structured output needs, so a tier that
+thinks hard over a lot of material needs room for both. The NVIDIA run used all
+16,000 tokens thinking over 229 pieces of evidence and never began the report.
+`STANDARD` therefore allows 64,000 — an allowance, not a spend: a call is billed
+for what it generates, and the run's cost ceiling meters that.
+
+**An allowance that large has to stream.** The SDK refuses a non-streaming
+request whose `max_tokens` implies more than ten minutes of generation, so a
+profile above `NON_STREAMING_MAX_TOKENS` is sent as a stream and read to the
+final message. Smaller tiers keep the plain request.
+
+**Exhaustion is not a refusal.** A response stopped by `max_tokens` without a
+complete answer raises `ProviderOutputTruncated`, which says what happened and
+carries what the call cost. Retrying the same request cannot fit a larger answer
+into the same allowance, so a caller can treat it as permanent.
+
 **The trust boundary is enforced by where text is placed, not by wording.** The
 instruction is `Trusted` and goes in `system`; the material is `Untrusted` and
 goes in a user message, inside the generated delimiters `envelope.py` draws.
@@ -31,11 +48,20 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, final
+from typing import Final, Literal, final
 
 import anthropic
-from anthropic.types import OutputConfigParam, ThinkingConfigParam, Usage
-from pydantic import BaseModel
+from anthropic.types import (
+    JSONOutputFormatParam,
+    Message,
+    MessageParam,
+    OutputConfigParam,
+    TextBlock,
+    TextBlockParam,
+    ThinkingConfigParam,
+    Usage,
+)
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from scrapr_core.llm.contract import (
     ModelTier,
@@ -54,7 +80,9 @@ __all__ = [
     "MODEL_CHEAP",
     "MODEL_DEEP",
     "MODEL_STANDARD",
+    "NON_STREAMING_MAX_TOKENS",
     "AnthropicProvider",
+    "ProviderOutputTruncated",
     "ProviderRefusal",
     "TierProfile",
 ]
@@ -63,6 +91,14 @@ __all__ = [
 MODEL_CHEAP = "claude-haiku-4-5"
 MODEL_STANDARD = "claude-sonnet-5"
 MODEL_DEEP = "claude-opus-5"
+
+NON_STREAMING_MAX_TOKENS: Final = 21_333
+"""The largest `max_tokens` the SDK sends without streaming.
+
+The SDK estimates an hour per 128,000 tokens and refuses a plain request it
+expects to outlast ten minutes: `3600 * max_tokens / 128_000 > 600`, which is
+anything above 21,333. A test pins this against the SDK itself, so an upgrade
+that moves the line fails there rather than in production."""
 
 
 class ProviderRefusal(RuntimeError):
@@ -75,6 +111,28 @@ class ProviderRefusal(RuntimeError):
     model could not be reached" — a distinction `REQ-SEC-010` needs when
     deciding what a user may be told.
     """
+
+
+class ProviderOutputTruncated(RuntimeError):
+    """The model spent its whole `max_tokens` before completing the answer.
+
+    Not a refusal and not a transport failure: the model was answering and ran
+    out of room, whether in thinking or partway through the JSON. The same
+    request would exhaust the same allowance again, so this is the one provider
+    failure a caller should not retry as sent.
+
+    Carries the usage, because the tokens were generated and billed even though
+    nothing usable came back — a cost report that dropped them would under-count
+    exactly the calls that went wrong.
+    """
+
+    def __init__(
+        self, message: str, *, model: str, tier: ModelTier, usage: TokenUsage
+    ) -> None:
+        super().__init__(message)
+        self.model = model
+        self.tier = tier
+        self.usage = usage
 
 
 @final
@@ -110,7 +168,10 @@ DEFAULT_PROFILES: dict[ModelTier, TierProfile] = {
     ),
     ModelTier.STANDARD: TierProfile(
         model=MODEL_STANDARD,
-        max_tokens=16_000,
+        # Synthesis thinks over every piece of evidence a run gathered and then
+        # writes the whole report; both come out of this allowance. Above
+        # `NON_STREAMING_MAX_TOKENS`, so this tier streams.
+        max_tokens=64_000,
         adaptive_thinking=True,
         effort="high",
         input_micros_per_token=2,
@@ -149,6 +210,77 @@ def _estimate_micros(usage: Usage, profile: TierProfile) -> int:
         + cached * profile.input_micros_per_token // 10
         + written * profile.input_micros_per_token * 125 // 100
         + output * profile.output_micros_per_token
+    )
+
+
+def _output_config(schema: type[BaseModel], profile: TierProfile) -> OutputConfigParam:
+    """The response schema, plus effort where the model takes it.
+
+    Built exactly as the SDK's `messages.parse` builds it, so the wire request
+    is unchanged. The response is parsed here rather than by that helper
+    because the helper validates first: a stream cut off mid-JSON raises at the
+    end of the text block, before the event that says *why* it ended arrives,
+    and a truncation would surface as a schema error.
+    """
+    output_format = JSONOutputFormatParam(
+        type="json_schema",
+        schema=anthropic.transform_schema(TypeAdapter(schema).json_schema()),
+    )
+    # `effort` is left out entirely when unset — Haiku rejects the key itself.
+    if profile.effort is None:
+        return OutputConfigParam(format=output_format)
+    return OutputConfigParam(format=output_format, effort=profile.effort)
+
+
+def _parse[T: BaseModel](
+    message: Message,
+    schema: type[T],
+    profile: TierProfile,
+    tier: ModelTier,
+    usage: TokenUsage,
+) -> T:
+    """The structured answer, or the reason there is none.
+
+    A response that stopped at `max_tokens` without a complete answer is
+    truncation, whether the model never reached the answer or stopped partway
+    through it. Any other stop keeps its existing meaning: no text is
+    `ProviderRefusal`, and invalid JSON is the schema's own `ValidationError`.
+    """
+    exhausted = message.stop_reason == "max_tokens"
+    text = next(
+        (block.text for block in message.content if isinstance(block, TextBlock)),
+        None,
+    )
+
+    if text is None:
+        if exhausted:
+            raise _truncated(schema, profile, tier, usage, "before starting it")
+        raise ProviderRefusal(
+            f"{profile.model} returned no parsable {schema.__name__}; "
+            f"stop_reason={message.stop_reason!r}"
+        )
+
+    try:
+        return schema.model_validate_json(text)
+    except ValidationError as exc:
+        if exhausted:
+            raise _truncated(schema, profile, tier, usage, "partway through it") from exc
+        raise
+
+
+def _truncated(
+    schema: type[BaseModel],
+    profile: TierProfile,
+    tier: ModelTier,
+    usage: TokenUsage,
+    where: str,
+) -> ProviderOutputTruncated:
+    return ProviderOutputTruncated(
+        f"{profile.model} exhausted max_tokens={profile.max_tokens} writing "
+        f"{schema.__name__}, {where} ({usage.output_tokens} output tokens)",
+        model=profile.model,
+        tier=tier,
+        usage=usage,
     )
 
 
@@ -197,19 +329,8 @@ class AnthropicProvider:
         """Answer `instruction` about `untrusted`, shaped as `schema`."""
         profile = self.profile_for(model_tier)
 
-        # Absent rather than null: the SDK's `omit` sentinel leaves a parameter
-        # out of the wire request entirely, which is what Haiku needs — sending
-        # `effort: null` is still sending `effort`.
-        thinking: ThinkingConfigParam | anthropic.Omit = (
-            {"type": "adaptive"} if profile.adaptive_thinking else anthropic.omit
-        )
-        output_config: OutputConfigParam | anthropic.Omit = anthropic.omit
-        if profile.effort is not None:
-            output_config = OutputConfigParam(effort=profile.effort)
-
-        message = await self._client.messages.parse(
-            model=profile.model,
-            max_tokens=profile.max_tokens,
+        message = await self._send(
+            profile,
             # The instruction is the stable prefix across every call this stage
             # makes, which is exactly what caches well (`DEC-06 §5`). Anything
             # per-run placed ahead of it would forfeit the discount silently.
@@ -221,9 +342,12 @@ class AnthropicProvider:
                 }
             ],
             messages=[{"role": "user", "content": self._material(untrusted)}],
-            output_format=schema,
-            thinking=thinking,
-            output_config=output_config,
+            output_config=_output_config(schema, profile),
+        )
+        usage = TokenUsage(
+            input_tokens=int(getattr(message.usage, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(message.usage, "output_tokens", 0) or 0),
+            cost_micros=_estimate_micros(message.usage, profile),
         )
 
         # Always checked before reading content: on a refusal the content is
@@ -234,22 +358,51 @@ class AnthropicProvider:
                 f"{profile.model} declined the request for {schema.__name__}"
             )
 
-        parsed = message.parsed_output
-        if parsed is None:
-            raise ProviderRefusal(
-                f"{profile.model} returned no parsable {schema.__name__}; "
-                f"stop_reason={message.stop_reason!r}"
-            )
-
         return StructuredResult(
-            value=parsed,
+            value=_parse(message, schema, profile, model_tier, usage),
             model=profile.model,
             tier=model_tier,
-            usage=TokenUsage(
-                input_tokens=int(getattr(message.usage, "input_tokens", 0) or 0),
-                output_tokens=int(getattr(message.usage, "output_tokens", 0) or 0),
-                cost_micros=_estimate_micros(message.usage, profile),
-            ),
+            usage=usage,
+        )
+
+    async def _send(
+        self,
+        profile: TierProfile,
+        *,
+        system: list[TextBlockParam],
+        messages: list[MessageParam],
+        output_config: OutputConfigParam,
+    ) -> Message:
+        """Send one request, streamed when the allowance is too large not to be.
+
+        The stream is read to its final message rather than consumed
+        incrementally: nothing here can use half a structured answer, and the
+        accumulated message has the same shape a plain request returns.
+        """
+        # Absent rather than null: the SDK's `omit` sentinel leaves a parameter
+        # out of the wire request entirely, which is what Haiku needs.
+        thinking: ThinkingConfigParam | anthropic.Omit = (
+            {"type": "adaptive"} if profile.adaptive_thinking else anthropic.omit
+        )
+
+        if profile.max_tokens > NON_STREAMING_MAX_TOKENS:
+            async with self._client.messages.stream(
+                model=profile.model,
+                max_tokens=profile.max_tokens,
+                system=system,
+                messages=messages,
+                thinking=thinking,
+                output_config=output_config,
+            ) as stream:
+                return await stream.get_final_message()
+
+        return await self._client.messages.create(
+            model=profile.model,
+            max_tokens=profile.max_tokens,
+            system=system,
+            messages=messages,
+            thinking=thinking,
+            output_config=output_config,
         )
 
     @staticmethod

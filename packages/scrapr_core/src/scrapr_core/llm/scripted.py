@@ -47,7 +47,10 @@ __all__ = ["ScriptedProvider", "UnsupportedSchemaError"]
 _UUID_PATTERN = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I
 )
-_SENTENCE = re.compile(r"[^.!?]+[.!?]")
+_SENTENCE = re.compile(r"\S.*?[.!?](?=\s|$)", re.S)
+"""A sentence ends at terminal punctuation followed by whitespace or the end.
+Ending at any `.` cut "$1.2bn" to "$1." — a statement misreporting the figure,
+which extraction's figure check rightly refuses."""
 
 MAX_EXCERPT_WORDS = 12
 

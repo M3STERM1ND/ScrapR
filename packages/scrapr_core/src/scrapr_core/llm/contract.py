@@ -21,6 +21,7 @@ across seven call sites.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum, unique
@@ -70,10 +71,22 @@ class UntrustedDocument:
 
     content: Untrusted
     label: str = "document"
+    ref: str | None = None
+    """The block number the envelope shows (`#<ref>`), when a stage needs the
+    model to point back at a block. Unset, blocks are numbered by position.
+
+    Extraction needs it: positional numbering counted the question as `#1`, so
+    the first retrieved item was `#2` while the schema asked for index `0`. A
+    model answering with the number it could see pointed every excerpt two
+    blocks away from its source, and grounding dropped it."""
 
     def __post_init__(self) -> None:
         if not self.label.strip():
             raise ValueError("an untrusted document needs a label to be referred by")
+        if self.ref is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", self.ref):
+            # Application-authored and rendered into the envelope header, so it
+            # must not be able to carry anything but a short token.
+            raise ValueError("a document ref must be a short alphanumeric token")
 
 
 @final

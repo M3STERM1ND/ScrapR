@@ -64,13 +64,14 @@ def render_untrusted(documents: Sequence[UntrustedDocument]) -> str:
 
     blocks = [MATERIAL_PREAMBLE]
     for index, (document, text) in enumerate(zip(documents, texts, strict=True), 1):
-        # The label and origin are application-authored; only `text` came from
-        # outside, and it sits alone between the delimiters.
+        # The label, ref and origin are application-authored; only `text` came
+        # from outside, and it sits alone between the delimiters.
+        number = document.ref if document.ref is not None else str(index)
         blocks.append(
-            f"<<{delimiter} #{index} label={document.label!r} "
+            f"<<{delimiter} #{number} label={document.label!r} "
             f"origin={document.content.origin!s}>>\n"
             f"{text}\n"
-            f"<<END {delimiter} #{index}>>"
+            f"<<END {delimiter} #{number}>>"
         )
 
     return "\n\n".join(blocks)

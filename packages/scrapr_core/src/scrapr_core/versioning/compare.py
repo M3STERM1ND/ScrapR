@@ -36,7 +36,7 @@ from scrapr_core.db.enums import ClaimType, EvidenceRole, SourceCategory
 from scrapr_core.db.models import Claim, ClaimEvidence, Evidence, ResearchVersion, Source
 from scrapr_core.domain.json import JsonMapping, JsonValue
 from scrapr_core.evidence.conflict import TOLERANCES, compare
-from scrapr_core.evidence.normalize import MetricClass, NormalizedValue, classify_metric
+from scrapr_core.evidence.normalize import MetricClass, NormalizedValue, classify_statement
 
 __all__ = [
     "MATCH_THRESHOLD",
@@ -657,7 +657,7 @@ def load_snapshot(session: Session, version_id: UUID) -> tuple[list[ClaimSnapsho
                 value=NormalizedValue(
                     reported=evidence.value_raw or evidence.content,
                     status=evidence.normalization,
-                    metric_class=classify_metric(evidence.content),
+                    metric_class=classify_statement(evidence.content),
                     value=evidence.value_normalized,
                     currency=evidence.currency,
                 ),

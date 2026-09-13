@@ -32,6 +32,7 @@ from scrapr_core.db.enums import SourceCategory
 from scrapr_core.domain.json import JsonMapping, JsonValue
 from scrapr_core.tools.contract import (
     ToolCategory,
+    ToolItem,
     ToolOutcome,
     ToolRequest,
     ToolResult,
@@ -60,6 +61,7 @@ class SecEdgarTool:
 
     async def invoke(self, request: ToolRequest) -> ToolOutcome:
         query = str(request.params.get("query", "")).strip()
+        symbol = str(request.params.get("symbol") or "").strip().upper()
         if not query:
             return failure("not_found", "no query supplied", self.name, self.category)
 
@@ -68,6 +70,9 @@ class SecEdgarTool:
             payload, kind, detail = await get_json(
                 client,
                 EDGAR_SEARCH_URL,
+                # The company, as an exact phrase. The orchestrator sends a
+                # name here rather than the research question, which EDGAR
+                # matched as one long phrase and found nowhere.
                 params={"q": f'"{query}"', "forms": FORMS},
                 # Required. EDGAR rejects a request without a contactable
                 # User-Agent, which is why this string gates the category.
@@ -76,7 +81,7 @@ class SecEdgarTool:
             if kind is not None:
                 return failure(kind, detail, self.name, self.category)
 
-        return self._to_result(payload, request)
+        return self._to_result(payload, request, query, symbol)
 
     # ------------------------------------------------------------------
 
@@ -87,19 +92,29 @@ class SecEdgarTool:
                 return built
         return httpx.AsyncClient(timeout=request.budget.timeout_seconds)
 
-    def _to_result(self, payload: JsonValue, request: ToolRequest) -> ToolOutcome:
+    def _to_result(
+        self, payload: JsonValue, request: ToolRequest, query: str, symbol: str = ""
+    ) -> ToolOutcome:
         hits = _hits(payload)
         if hits is None:
             return failure(
                 "error", "edgar returned no hits structure", self.name, self.category
             )
 
-        items = []
-        for hit in hits[: request.budget.max_results]:
+        items: list[ToolItem] = []
+        for hit in hits:
+            if len(items) >= request.budget.max_results:
+                break
             if not isinstance(hit, dict):
                 continue
             source = hit.get("_source")
             if not isinstance(source, dict):
+                continue
+            if not _filed_by(source, query, symbol):
+                # Full-text search matches every filing that *mentions* the
+                # company — a supplier's 10-K, a customer's proxy. Those are
+                # not the subject's filings, and tiering them `PRIMARY` as if
+                # they were would be the worst kind of wrong citation.
                 continue
 
             accession, document = _locate(hit)
@@ -164,6 +179,24 @@ def _locate(hit: JsonMapping) -> tuple[str, str]:
     raw = str(hit.get("_id") or "")
     accession, _, document = raw.partition(":")
     return accession.replace("-", ""), document
+
+
+def _filed_by(source: JsonMapping, query: str, symbol: str) -> bool:
+    """Whether a hit's registrant is the company asked about.
+
+    EDGAR's display name reads "NVIDIA CORP (NVDA) (CIK 0001045810)", so the
+    ticker in parentheses or the company name within it identifies the filer.
+    """
+    names = source.get("display_names")
+    if not isinstance(names, list):
+        return False
+    wanted = query.casefold()
+    ticker = f"({symbol.casefold()})" if symbol else ""
+    for name in names:
+        folded = str(name).casefold()
+        if (ticker and ticker in folded) or (wanted and wanted in folded):
+            return True
+    return False
 
 
 def _first_cik(source: JsonMapping) -> str:

@@ -442,14 +442,14 @@ async def test_a_reporting_period_reaches_the_evidence_row(
     (period shown on citation inspection) cannot hold without this, and
     `DEC-10 §4.1` cannot exclude on a period that was thrown away.
     """
-    from pipeline_support import period_split_registry
+    from pipeline_support import PERIOD_SPLIT, period_split_registry
 
     start_research(session_factory)
 
     await run_pipeline(
         session_factory,
         period_split_registry(),
-        disputing_provider(),
+        disputing_provider(PERIOD_SPLIT),
         synthesis=cite_everything,
     )
 
@@ -469,7 +469,7 @@ async def test_different_periods_do_not_produce_a_conflict(
     unit test for this passed the whole time — it supplied the periods by hand,
     which the pipeline did not.
     """
-    from pipeline_support import period_split_registry
+    from pipeline_support import PERIOD_SPLIT, period_split_registry
 
     from scrapr_core.db.models import Conflict
 
@@ -478,13 +478,16 @@ async def test_different_periods_do_not_produce_a_conflict(
     await run_pipeline(
         session_factory,
         period_split_registry(),
-        disputing_provider(),
+        disputing_provider(PERIOD_SPLIT),
         synthesis=cite_everything,
     )
 
     with session_factory() as session:
         conflicts = session.execute(select(Conflict)).scalars().all()
+        rows = session.execute(select(Evidence)).scalars().all()
 
+    # Both years must actually be in evidence, or "no conflict" proves nothing.
+    assert {row.period_end.year for row in rows if row.period_end} == {2024, 2025}
     assert not conflicts, "two different years were reported as a disagreement"
 
 
@@ -552,14 +555,14 @@ async def test_the_reporting_period_is_inspectable_on_the_claim(
     nothing put it on the wire. Same shape as every other gap in this phase —
     a value computed correctly and stopped one layer short of a reader.
     """
-    from pipeline_support import period_split_registry
+    from pipeline_support import PERIOD_SPLIT, period_split_registry
 
     start_research(session_factory)
 
     await run_pipeline(
         session_factory,
         period_split_registry(),
-        disputing_provider(),
+        disputing_provider(PERIOD_SPLIT),
         synthesis=cite_everything,
     )
 

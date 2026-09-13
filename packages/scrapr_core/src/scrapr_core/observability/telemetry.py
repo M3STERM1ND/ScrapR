@@ -27,6 +27,7 @@ failure detail go to `tool_invocations`, which no API route reads.
 from __future__ import annotations
 
 import contextvars
+import re
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -40,10 +41,12 @@ from sqlalchemy.orm import Session
 
 from scrapr_core.db.models import ToolInvocation
 from scrapr_core.domain.json import JsonMapping
+from scrapr_core.llm.anthropic_provider import ProviderOutputTruncated
 from scrapr_core.llm.contract import (
     LLMProvider,
     ModelTier,
     StructuredResult,
+    TokenUsage,
     UntrustedDocument,
 )
 from scrapr_core.security.trust import Trusted
@@ -56,7 +59,9 @@ __all__ = [
     "SpendsCost",
     "StepTelemetry",
     "current_telemetry",
+    "record_retrieval",
     "record_tool_call",
+    "redact_detail",
     "step_telemetry",
 ]
 
@@ -92,6 +97,13 @@ class RunLedger:
     model_calls: int = 0
     tool_calls: int = 0
     by_tier: dict[str, dict[str, int]] = field(default_factory=dict)
+    retrieval: dict[str, int] = field(default_factory=dict)
+    """Counts between retrieval and evidence: items returned, candidates the
+    model proposed, evidence grounded, drops by reason, fallbacks taken."""
+
+    def add_retrieval(self, counts: Mapping[str, int]) -> None:
+        for name, value in counts.items():
+            self.retrieval[name] = self.retrieval.get(name, 0) + int(value)
 
     def add_usage(self, tier: ModelTier, input_tokens: int, output_tokens: int, cost_micros: int) -> None:
         self.input_tokens += input_tokens
@@ -112,6 +124,7 @@ class RunLedger:
             "model_calls": self.model_calls,
             "tool_calls": self.tool_calls,
             "by_tier": {tier: dict(values) for tier, values in self.by_tier.items()},
+            "retrieval": dict(self.retrieval),
         }
 
 
@@ -173,15 +186,33 @@ class MeteredProvider:
         schema: type[T],
         model_tier: ModelTier = ModelTier.STANDARD,
     ) -> StructuredResult[T]:
-        result = await self._inner.complete_structured(instruction, untrusted, schema, model_tier)
-        telemetry = current_telemetry()
-        if telemetry is not None:
-            usage = result.usage
-            telemetry.ledger.add_usage(
-                result.tier, usage.input_tokens, usage.output_tokens, usage.cost_micros
-            )
-            telemetry.charge(usage.cost_micros)
+        try:
+            result = await self._inner.complete_structured(instruction, untrusted, schema, model_tier)
+        except ProviderOutputTruncated as exc:
+            # The tokens were generated and billed even though no answer came
+            # back, so they count against the step like any other call.
+            _record_usage(exc.tier, exc.usage)
+            raise
+        _record_usage(result.tier, result.usage)
         return result
+
+
+def _record_usage(tier: ModelTier, usage: TokenUsage) -> None:
+    telemetry = current_telemetry()
+    if telemetry is not None:
+        telemetry.ledger.add_usage(tier, usage.input_tokens, usage.output_tokens, usage.cost_micros)
+        telemetry.charge(usage.cost_micros)
+
+
+def record_retrieval(counts: Mapping[str, int]) -> None:
+    """Add retrieval-to-evidence counts to the step in scope, if there is one.
+
+    Flattened names (`dropped_excerpt_not_in_source`) so the run's
+    `effort_used.retrieval` stays a flat map of integers a query can sum.
+    """
+    telemetry = current_telemetry()
+    if telemetry is not None:
+        telemetry.ledger.add_retrieval(counts)
 
 
 def _domain(params: Mapping[str, object]) -> str | None:
@@ -242,5 +273,32 @@ def record_tool_call(
             request_digest={"stage": telemetry.stage, **_request_record(request)},
             cost_micros=cost,
             source_domain=_domain(request.params),
+            result_items=None if isinstance(outcome, ToolFailure) else len(outcome.items),
+            error_detail=(
+                redact_detail(outcome.message) if isinstance(outcome, ToolFailure) else None
+            ),
         )
     )
+
+
+ERROR_DETAIL_LIMIT: Final = 500
+
+_QUERY_STRING = re.compile(r"(https?://[^\s?#\"']+)\?[^\s\"']*")
+_SECRET_PAIR = re.compile(
+    r"(?i)\b(api[_-]?key|apikey|app[_-]?key|app[_-]?id|token|secret|password|key)"
+    r"(\s*[=:]\s*)[\"']?[^\s&\"',;]+"
+)
+
+
+def redact_detail(message: str) -> str:
+    """A failure message fit for an operator table (`REQ-OBS-007`).
+
+    Providers authenticate by query parameter, and an HTTP client's exception
+    text includes the URL it called — so a raw message is one bad day away from
+    storing an API key. Query strings are cut and anything shaped like a
+    credential assignment is masked before the text is clipped.
+    """
+    cleaned = _QUERY_STRING.sub(r"\1?<redacted>", message)
+    cleaned = _SECRET_PAIR.sub(r"\1\2<redacted>", cleaned)
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:ERROR_DETAIL_LIMIT]

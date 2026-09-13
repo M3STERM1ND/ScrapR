@@ -51,9 +51,9 @@ def settings(**overrides: object) -> Settings:
     to have a key exported would be worse than no test at all — and one that
     passed only because a local fixture filled the gap would be worse still.
     """
-    blank = {name: "" for name in ALL_KEYS}
+    blank: dict[str, object] = {name: "" for name in ALL_KEYS}
     return Settings().model_copy(
-        update={**blank, "scrapr_env": "production", **overrides}
+        update={**blank, "allow_fixtures": False, "scrapr_env": "production", **overrides}
     )
 
 
@@ -140,20 +140,107 @@ def test_production_never_falls_back_to_a_fixture() -> None:
     )
 
 
-def test_a_keyless_local_run_still_has_retrieval() -> None:
-    """A developer without keys must be able to run the pipeline.
+def test_a_keyless_local_run_with_fixtures_opted_in_still_has_retrieval() -> None:
+    """A developer without keys can still exercise the pipeline — by asking to.
 
     Before this fallback existed, a keyless local run registered page fetch
     alone, found nothing, and closed the version as failed — which reads as a
     research defect rather than an absent credential.
     """
-    registry, report = build_registry(settings(scrapr_env="local"))
+    registry, report = build_registry(
+        settings(scrapr_env="local", allow_fixtures=True)
+    )
 
     assert report.stubbed, "nothing stood in for the unserved categories"
     assert registry.for_category(ToolCategory.WEB_SEARCH)
     # And it says plainly what it is, because a local run that looks like
     # research is exactly what a stand-in must not be mistaken for.
     assert "not real research" in report.summary
+
+
+# --------------------------------------------------------------------------
+# The NVIDIA run: fixture data must never reach real research
+# --------------------------------------------------------------------------
+
+
+def _fixtures(registry: object) -> list[FixtureTool]:
+    return [
+        tool
+        for category in registry.categories()  # type: ignore[attr-defined]
+        for tool in registry.for_category(category)  # type: ignore[attr-defined]
+        if isinstance(tool, FixtureTool)
+    ]
+
+
+def test_fixtures_are_off_unless_explicitly_requested() -> None:
+    """Being local is not consent. The NVIDIA run was local, keyed for search,
+    jobs and financial data, and silently got a fixture for filings."""
+    registry, report = build_registry(settings(scrapr_env="local"))
+
+    assert _fixtures(registry) == []
+    assert report.stubbed == ()
+    assert ToolCategory.FILINGS in report.missing
+
+
+def test_the_nvidia_configuration_gets_no_filings_fixture() -> None:
+    """The exact shape of the first real run: a model key, Tavily, FMP and
+    Adzuna configured, no EDGAR user agent, local environment. Filings must be a
+    named gap, not a canned "$1.2bn revenue" item."""
+    registry, report = build_registry(
+        settings(
+            scrapr_env="local",
+            anthropic_api_key="sk-test",
+            tavily_api_key="tv-test",
+            fmp_api_key="fmp-test",
+            adzuna_app_id="id-test",
+            adzuna_app_key="key-test",
+        )
+    )
+
+    assert _fixtures(registry) == []
+    assert not registry.for_category(ToolCategory.FILINGS)
+    assert report.missing == (ToolCategory.FILINGS,)
+
+
+def test_a_real_model_overrides_the_fixture_opt_in() -> None:
+    """Even with the flag set, a run a real model reads is real research."""
+    registry, report = build_registry(
+        settings(scrapr_env="local", anthropic_api_key="sk-test", allow_fixtures=True)
+    )
+
+    assert _fixtures(registry) == []
+    assert report.fixtures_refused
+    assert "SCRAPR_ALLOW_FIXTURES ignored" in report.summary
+
+
+def test_production_refuses_to_start_with_fixtures_allowed() -> None:
+    problems = settings(scrapr_env="production", allow_fixtures=True).production_problems()
+
+    assert any("SCRAPR_ALLOW_FIXTURES" in problem for problem in problems)
+
+
+async def test_a_fixture_never_presents_itself_as_a_real_publisher() -> None:
+    """The fixture that became "a Reuters filings report" lived on
+    `reuters.com`. A fixture now names itself, lives on a reserved host that
+    cannot resolve, and tiers `LOWER`."""
+    from scrapr_core.db.enums import AuthorityTier
+    from scrapr_core.evidence.tiering import PUBLISHERS, assign_tier
+    from scrapr_core.tools.builder import FIXTURE_HOST
+    from scrapr_core.tools.contract import ToolRequest, ToolResult
+
+    registry, _ = build_registry(settings(scrapr_env="local", allow_fixtures=True))
+
+    for tool in _fixtures(registry):
+        outcome = await tool.invoke(ToolRequest(category=tool.category, params={"query": "x"}))
+        assert isinstance(outcome, ToolResult)
+        for item in outcome.items:
+            url = item.source_url or ""
+            assert url.startswith(f"https://{FIXTURE_HOST}/")
+            assert not any(publisher in url for publisher in PUBLISHERS)
+            assert "FIXTURE" in item.source_name
+            assert "FIXTURE" in item.content.text
+            tier = assign_tier(url=url, category=item.source_category, subject_hosts=frozenset())
+            assert tier.tier is AuthorityTier.LOWER
 
 
 def test_a_configured_category_is_not_stubbed_over_locally() -> None:
@@ -210,6 +297,19 @@ def test_the_configured_models_reach_the_provider() -> None:
     from scrapr_core.llm.contract import ModelTier
 
     assert provider.profile_for(ModelTier.STANDARD).model == "claude-opus-5"
+
+
+def test_a_model_override_keeps_the_tiers_output_allowance() -> None:
+    """Only the model name is configurable. Swapping it must not quietly put
+    synthesis back on an allowance it can spend entirely on thinking."""
+    from scrapr_core.llm.contract import ModelTier
+
+    provider = build_provider(
+        settings(anthropic_api_key="sk-test", model_standard="claude-opus-5")
+    )
+
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.profile_for(ModelTier.STANDARD).max_tokens == 64_000
 
 
 def test_a_worker_with_no_model_refuses_to_run_in_production() -> None:

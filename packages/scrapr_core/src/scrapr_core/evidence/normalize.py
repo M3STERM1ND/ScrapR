@@ -38,6 +38,8 @@ __all__ = [
     "MetricClass",
     "NormalizedValue",
     "classify_metric",
+    "classify_statement",
+    "figure_span",
     "normalize_value",
     "parse_period",
 ]
@@ -105,7 +107,13 @@ _KNOWN_CODES: Final[frozenset[str]] = frozenset(
 )
 
 _RATIO_TERMS = re.compile(
-    r"\b(margin|growth|yield|rate|share of|percent|percentage|cagr|churn)\b", re.I
+    # `rate` only as a compound noun. Bare, it matched the verb: "employees
+    # rate their compensation 4.5 out of 5" became a ratio, and so did the
+    # revenue figure beside it, and the two were reported as disagreeing.
+    r"\b(margin|growth|yield|share of|percent|percentage|cagr|churn|"
+    r"(?:interest|growth|tax|churn|conversion|retention|attrition|"
+    r"unemployment|inflation|exchange|win|hit|default|utili[sz]ation)\s+rates?)\b",
+    re.I,
 )
 _COUNT_TERMS = re.compile(
     r"\b(headcount|employees|staff|roles|openings|postings|locations|stores|users|"
@@ -200,6 +208,63 @@ def classify_metric(text: str) -> MetricClass:
     return MetricClass.UNKNOWN
 
 
+_PERCENT_TAIL = re.compile(r"\s*(?:%|per\s?cent\b|percent\b|percentage points?\b)", re.I)
+_CODE_BEFORE = re.compile(r"\b([A-Z]{3})\s*$")
+_CODE_AFTER = re.compile(r"^\s*(?:[a-zA-Z]{1,10}\s+)?([A-Z]{3})\b")
+
+
+def classify_statement(text: str) -> MetricClass:
+    """The metric class of the figure a statement reports.
+
+    `classify_metric` reads the whole sentence, which is wrong whenever a
+    sentence carries more than one number. "NVIDIA reported $1.2bn revenue, up
+    18% year over year" contains a `%`, so the sentence classified as a ratio —
+    while the value normalisation actually extracted, and stored, is the
+    $1.2bn. The class has to describe that figure.
+
+    So the figure decides first: a percentage is a ratio; a currency amount is
+    currency (or a share price, when the sentence says so). Only a figure that
+    says nothing about itself falls back to the sentence's terms.
+    """
+    match = _first_figure(text)
+    if match is not None:
+        # From the end of the digits: the `scale` group swallows any short
+        # word, so "18 percent" would otherwise hide its own unit.
+        if _PERCENT_TAIL.match(text[match.end("digits") :]):
+            return MetricClass.RATIO
+        if _figure_currency(text, match) is not None:
+            if _PRICE_TERMS.search(text):
+                return MetricClass.SHARE_PRICE
+            return MetricClass.CURRENCY
+    return classify_metric(text)
+
+
+def figure_span(text: str) -> tuple[int, int] | None:
+    """Where the figure `normalize_value` would extract sits in the text."""
+    match = _first_figure(text)
+    if match is None:
+        return None
+    # The `scale` group matches any short word, so "4.5 out of 5" would count
+    # "out" as part of the figure. Only a real scale word belongs to it.
+    scale = (match.group("scale") or "").lower().rstrip(".")
+    end = match.end("scale") if scale in SCALE_WORDS else match.end("digits")
+    return match.start("digits"), end
+
+
+def _figure_currency(text: str, match: re.Match[str]) -> str | None:
+    """The currency written *at* the figure: its symbol, or an adjacent code."""
+    symbol = match.group("symbol")
+    if symbol:
+        return _CURRENCY_SYMBOLS.get(symbol)
+    before = _CODE_BEFORE.search(text[: match.start("digits")])
+    if before and before.group(1) in _KNOWN_CODES:
+        return before.group(1)
+    after = _CODE_AFTER.match(text[match.end("digits") :])
+    if after and after.group(1) in _KNOWN_CODES:
+        return after.group(1)
+    return None
+
+
 def _currency_of(text: str, symbol: str | None) -> str | None:
     """Currency from an explicit code, else from a symbol."""
     for code in _KNOWN_CODES:
@@ -251,7 +316,7 @@ def normalize_value(text: str, *, currency_hint: str | None = None) -> Normalize
     `reportedCurrency` beside the figure — and is used only when the text
     itself does not say. A hint never overrides what the source wrote.
     """
-    metric = classify_metric(text)
+    metric = classify_statement(text)
     match = _first_figure(text)
 
     if match is None:
@@ -294,7 +359,11 @@ def normalize_value(text: str, *, currency_hint: str | None = None) -> Normalize
     # the one character that says what it is.
     span = _reported_span(text, match, scaled)
 
-    is_percentage = "%" in text or metric is MetricClass.RATIO
+    # The figure's own unit, not any `%` elsewhere in the sentence: "$1.2bn,
+    # up 18%" is a currency amount that happens to sit beside a percentage.
+    is_percentage = bool(_PERCENT_TAIL.match(text[match.end("digits") :])) or (
+        metric is MetricClass.RATIO and _figure_currency(text, match) is None
+    )
     currency = _currency_of(text, match.group("symbol")) or (
         currency_hint if currency_hint else None
     )

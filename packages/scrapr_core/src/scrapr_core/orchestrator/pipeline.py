@@ -69,16 +69,26 @@ from scrapr_core.db.models import (
 )
 from scrapr_core.db.repositories.activity import ActivityRepository
 from scrapr_core.db.repositories.evidence import EvidenceRepository
-from scrapr_core.db.repositories.questions import QuestionRepository
+from scrapr_core.db.repositories.questions import QuestionCoverage, QuestionRepository
 from scrapr_core.db.repositories.uploads import UploadRepository
-from scrapr_core.domain.json import JsonMapping
-from scrapr_core.evidence.normalize import classify_metric
+from scrapr_core.domain.json import JsonMapping, JsonValue
+from scrapr_core.evidence.normalize import classify_statement
 from scrapr_core.evidence.tiering import registrable_host
 from scrapr_core.jobs.contract import StepContext, StepHandler, StepPermanentError
+from scrapr_core.llm.anthropic_provider import ProviderOutputTruncated
 from scrapr_core.llm.contract import LLMProvider
-from scrapr_core.observability.telemetry import MeteredProvider, current_telemetry
+from scrapr_core.observability.telemetry import (
+    MeteredProvider,
+    current_telemetry,
+    record_retrieval,
+)
 from scrapr_core.orchestrator.budget import AreaReservation, RunBudget
-from scrapr_core.orchestrator.extract import extract_from_items
+from scrapr_core.orchestrator.extract import (
+    ExtractionOutcome,
+    ExtractionReport,
+    GroundedEvidence,
+    extract_with_report,
+)
 from scrapr_core.orchestrator.interpret import (
     Interpretation,
     ObjectiveInput,
@@ -86,6 +96,13 @@ from scrapr_core.orchestrator.interpret import (
 )
 from scrapr_core.orchestrator.outcome import AreaOutcome, RunOutcome, summarise_run
 from scrapr_core.orchestrator.plan import plan_research
+from scrapr_core.orchestrator.queries import (
+    SPECIALIZED_CATEGORIES,
+    QuestionGap,
+    SubjectTarget,
+    request_params,
+    subject_target,
+)
 from scrapr_core.orchestrator.retrieve import RetrievalCache, RoundResult, retrieve_area
 from scrapr_core.orchestrator.sufficiency import (
     AreaProgress,
@@ -356,7 +373,11 @@ class ResearchHandler:
 
         area_questions = questions.for_area(version_id, area_name)
         categories = _categories_for(area_questions)
-        subject = research.subject or research.objective
+        target = subject_target(
+            research.subject or research.objective,
+            research.context_company,
+            research.context_ticker,
+        )
 
         # `REQ-DOC-005`. Documents are excluded from *planning*
         # (`TARGETED_CATEGORIES`) because they cannot answer "tell me about
@@ -384,10 +405,15 @@ class ResearchHandler:
         # left any area of two or more questions unable to afford even its
         # first round: the questions past the cap were skipped silently,
         # without a tool call, a failure, or a word in the report.
+        #
+        # One more slot per question where web search may have to stand in for
+        # a specialized provider: a fallback the reservation cannot afford is a
+        # fallback that silently never happens.
+        fallback_slot = 1 if self._fallback_possible(categories) else 0
         reservation = budget.reserve(
             area_rounds(len(area_questions))
             * max(1, len(area_questions))
-            * max(1, len(categories))
+            * max(1, len(categories) + fallback_slot)
         )
         rounds = 0
         new_sources_this_round = 0
@@ -397,6 +423,8 @@ class ResearchHandler:
         # checkpoint is the only place a later step can read them from.
         skipped: set[ToolCategory] = set()
         unread_sources = False
+        retrieval = ExtractionReport()
+        fallbacks = 0
         verdict = self._assess(
             questions, area_name, version_id, rounds, new_sources_this_round, budget
         )
@@ -406,23 +434,33 @@ class ResearchHandler:
             if not open_questions:
                 break
 
+            # Read once per round: what each still-open question lacks is what
+            # a follow-up round's queries are built from.
+            coverage = questions.coverage(version_id) if rounds > 0 else {}
             before = len(all_sources)
             for question in open_questions:
                 _heartbeat(activity, research.id, _area_label(area_name), version_id, categories)
-                result = await self._research_question(
+                gap = (
+                    _gap_for(questions, question, coverage) if rounds > 0 else None
+                )
+                searched = await self._research_question(
                     context,
                     question,
                     categories,
-                    subject,
+                    target,
                     questions,
                     evidence_repo,
                     reservation,
                     cache,
                     all_sources,
                     research.id,
+                    round_index=rounds,
+                    gap=gap,
                 )
-                skipped.update(result.skipped)
-                unread_sources = unread_sources or bool(result.failures)
+                skipped.update(searched.result.skipped)
+                unread_sources = unread_sources or bool(searched.result.failures)
+                retrieval = retrieval.merged(searched.report)
+                fallbacks += int(searched.fell_back)
 
             rounds += 1
             new_sources_this_round = len(all_sources) - before
@@ -452,61 +490,137 @@ class ResearchHandler:
             # them, and neither does a source that could not be read.
             "skipped_categories": sorted(category.value for category in skipped),
             "unread_sources": unread_sources,
+            # Between retrieval and evidence, in counts: what came back, what
+            # the model proposed, what survived grounding and why the rest did
+            # not. The first real run stored one fact from fifteen successful
+            # searches, and nothing on record could say where the rest went.
+            "retrieval": {**retrieval.as_json(), "fallbacks": fallbacks},
         }
+
+    def _fallback_possible(self, categories: Sequence[ToolCategory]) -> bool:
+        """Whether web search can stand in for this area's specialized providers."""
+        return (
+            any(category in SPECIALIZED_CATEGORIES for category in categories)
+            and ToolCategory.WEB_SEARCH not in categories
+            and bool(self.registry.for_category(ToolCategory.WEB_SEARCH))
+        )
 
     async def _research_question(
         self,
         context: StepContext,
         question: ResearchQuestion,
         categories: Sequence[ToolCategory],
-        subject: str,
+        target: SubjectTarget,
         questions: QuestionRepository,
         evidence_repo: EvidenceRepository,
         reservation: AreaReservation,
         cache: RetrievalCache,
         all_sources: set[UUID],
         research_session_id: UUID,
-    ) -> RoundResult:
-        """One question, one round: retrieve, extract, record.
+        *,
+        round_index: int = 0,
+        gap: QuestionGap | None = None,
+    ) -> _QuestionRound:
+        """One question, one round: retrieve, extract, record — then fall back.
 
         Returns the round so the area can accumulate what went unreached. The
         caller needs it: a skipped category and an unreadable source are both
         gaps the report owes the reader, and neither leaves a trace anywhere
         else.
+
+        **Each category is asked in its own terms** (`orchestrator.queries`),
+        and from the second round prose categories are asked about the
+        question's gap rather than the same sentence again.
+
+        **Web search stands in for specialized providers that produced nothing
+        usable.** A financial, filings or jobs provider that failed, returned
+        nothing, or returned items no evidence could be grounded in leaves the
+        question exactly as unanswered as if it had not been asked. When the
+        plan did not already include web search, it is asked in the same round.
+        What it finds goes through the same extraction and grounding as
+        everything else: a fallback widens where evidence may come from, never
+        what counts as evidence.
         """
+
+        def params_for(category: ToolCategory) -> dict[str, JsonValue]:
+            return request_params(
+                category, target, question.text, round_index=round_index, gap=gap
+            )
+
         result = await retrieve_area(
             question.area_name,
             categories,
-            f"{subject}: {question.text}",
+            f"{target.label}: {question.text}",
             self.registry,
             reservation,
             cache,
             session_id=research_session_id,
+            params_for=params_for,
         )
-
         items = [item for hit in result.results for item in hit.items]
-        grounded = await extract_from_items(items, question.text, self.provider)
+        extracted = await extract_with_report(items, question.text, self.provider)
+        self._record_evidence(context, question, questions, evidence_repo, extracted, all_sources)
+        report = extracted.report
 
-        for found in grounded:
+        fell_back = False
+        if self._fallback_possible(categories) and not _specialized_evidence(
+            result, extracted.evidence
+        ):
+            fallback = await retrieve_area(
+                question.area_name,
+                [ToolCategory.WEB_SEARCH],
+                f"{target.label}: {question.text}",
+                self.registry,
+                reservation,
+                cache,
+                params_for=params_for,
+            )
+            fell_back = not fallback.skipped
+            fallback_items = [item for hit in fallback.results for item in hit.items]
+            recovered = await extract_with_report(
+                fallback_items, question.text, self.provider
+            )
+            self._record_evidence(
+                context, question, questions, evidence_repo, recovered, all_sources
+            )
+            result = result.merged(fallback)
+            items = [*items, *fallback_items]
+            report = report.merged(recovered.report)
+
+        if not items and result.failures:
+            # Every category returned a failure and nothing readable came back —
+            # the fallback included. Terminal and honest rather than left open to
+            # burn the allocation (`DEC-04 §3.3`), and it becomes an uncertainty
+            # in the report.
+            questions.mark_unanswerable(
+                question,
+                {
+                    "kinds": sorted({failure.kind for failure in result.failures}),
+                    "categories": sorted(
+                        {category.value for category in categories}
+                        | ({ToolCategory.WEB_SEARCH.value} if fell_back else set())
+                    ),
+                },
+            )
+
+        _report_retrieval(question, round_index, report, fell_back, result.failures)
+        return _QuestionRound(result=result, report=report, fell_back=fell_back)
+
+    @staticmethod
+    def _record_evidence(
+        context: StepContext,
+        question: ResearchQuestion,
+        questions: QuestionRepository,
+        evidence_repo: EvidenceRepository,
+        extracted: ExtractionOutcome,
+        all_sources: set[UUID],
+    ) -> None:
+        for found in extracted.evidence:
             row = evidence_repo.record(
                 context.run.version_id, found.item, found.statement, found.excerpt
             )
             questions.link_evidence(question.id, row.id)
             all_sources.add(row.source_id)
-
-        if not items and result.failures:
-            # Every category returned a failure and nothing readable came back.
-            # Terminal and honest rather than left open to burn the allocation
-            # (`DEC-04 §3.3`), and it becomes an uncertainty in the report.
-            questions.mark_unanswerable(
-                question,
-                {
-                    "kinds": sorted({failure.kind for failure in result.failures}),
-                    "categories": [category.value for category in categories],
-                },
-            )
-
-        return result
 
     def _assess(
         self,
@@ -576,9 +690,14 @@ class SynthesizeHandler:
         # (`REQ-AGENT-009 AC-2`).
         outcome = summarise_run(_area_outcomes(context, questions), unresolved)
 
-        result = await synthesize(
-            inputs, unresolved, research.objective, self.provider
-        )
+        try:
+            result = await synthesize(
+                inputs, unresolved, research.objective, self.provider
+            )
+        except ProviderOutputTruncated as exc:
+            # The same evidence and instruction would exhaust the same allowance
+            # again, so a retry spends the same tokens to reach the same place.
+            raise StepPermanentError(f"synthesis output truncated: {exc}") from exc
         _persist_report(context, with_area_gaps(result.sections, outcome.gaps))
 
         # Stages 6, 8 and 9. Runs on the persisted claims, because conflict
@@ -616,6 +735,88 @@ class SynthesizeHandler:
 # --------------------------------------------------------------------------
 # Shared helpers
 # --------------------------------------------------------------------------
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class _QuestionRound:
+    """What researching one question for one round produced."""
+
+    result: RoundResult
+    report: ExtractionReport
+    fell_back: bool
+
+
+def _specialized_evidence(
+    result: RoundResult, evidence: Sequence[GroundedEvidence]
+) -> bool:
+    """Whether any grounded evidence came from a specialized provider.
+
+    By item identity, because the question is *which provider* the usable
+    evidence came from: news answering a question does not mean the financial
+    provider did.
+    """
+    specialized = {
+        id(item)
+        for hit in result.results
+        if hit.category in SPECIALIZED_CATEGORIES
+        for item in hit.items
+    }
+    return any(id(found.item) in specialized for found in evidence)
+
+
+def _gap_for(
+    questions: QuestionRepository,
+    question: ResearchQuestion,
+    coverage: Mapping[UUID, QuestionCoverage],
+) -> QuestionGap:
+    """What one open question still lacks, for its follow-up queries."""
+    found = coverage.get(question.id)
+    hosts = sorted(
+        {host for host in map(registrable_host, questions.cited_urls(question.id)) if host}
+    )
+    return QuestionGap(
+        distinct_sources=found.distinct_sources if found else 0,
+        above_lower_sources=found.above_lower_sources if found else 0,
+        cited_hosts=tuple(hosts),
+    )
+
+
+def _report_retrieval(
+    question: ResearchQuestion,
+    round_index: int,
+    report: ExtractionReport,
+    fell_back: bool,
+    failures: Sequence[ToolFailure],
+) -> None:
+    """Log and meter what happened between retrieval and evidence.
+
+    Counts and closed reasons only (`REQ-OBS-007`): the question text is not
+    logged, and neither is anything retrieved.
+    """
+    counts = {
+        "items_returned": report.items_returned,
+        "items_unreadable": report.items_unreadable,
+        "evidence_candidates": report.candidates,
+        "evidence_grounded": report.grounded,
+        "evidence_dropped": report.dropped_total,
+        "fallbacks": int(fell_back),
+        "failed_calls": len(failures),
+        **{f"dropped_{reason}": count for reason, count in report.dropped.items()},
+    }
+    record_retrieval(counts)
+    logger.info(
+        "retrieval question=%s round=%d items=%d candidates=%d grounded=%d "
+        "dropped=%s fallback=%s failures=%s",
+        question.id,
+        round_index + 1,
+        report.items_returned,
+        report.candidates,
+        report.grounded,
+        dict(report.dropped) or "{}",
+        fell_back,
+        sorted({f"{failure.category.value}:{failure.kind}" for failure in failures}) or "[]",
+    )
 
 
 def _heartbeat(
@@ -1234,7 +1435,7 @@ def _persist_visualizations(context: StepContext, version_id: UUID) -> None:
                 # a trend out of unordered numbers.
                 label=evidence.period_end.isoformat() if evidence.period_end else "",
                 value=evidence.value_normalized,
-                metric=classify_metric(evidence.content),
+                metric=classify_statement(evidence.content),
                 currency=evidence.currency,
                 comparable=evidence.normalization is NormalizationStatus.NORMALIZED,
             )

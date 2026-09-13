@@ -244,6 +244,24 @@ async def test_failures_are_not_cached() -> None:
     assert cache.get(request) is None
 
 
+@pytest.mark.parametrize("kind", ["blocked", "paywalled", "not_found"])
+async def test_a_failure_that_cannot_change_within_the_run_is_cached(kind: str) -> None:
+    """A rejected key is still rejected in round two. The first real run sent
+    FMP the same 403-bound request again in its second round."""
+    registry = ToolRegistry()
+    registry.register(
+        FailingFixtureTool(name="refused", category=ToolCategory.FINANCIAL, kind=kind)  # type: ignore[arg-type]
+    )
+    registry.freeze()
+    cache = RetrievalCache()
+
+    request = ToolRequest(category=ToolCategory.FINANCIAL, params={"query": "NVIDIA"})
+    outcome = await registry.invoke(request)
+    cache.put(request, outcome)
+
+    assert cache.get(request) is outcome
+
+
 # --------------------------------------------------------------------------
 # The budget
 # --------------------------------------------------------------------------

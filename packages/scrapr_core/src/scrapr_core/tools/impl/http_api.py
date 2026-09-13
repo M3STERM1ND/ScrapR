@@ -40,6 +40,7 @@ __all__ = [
     "api_item",
     "classify_status",
     "failure",
+    "failure_detail",
     "get_json",
 ]
 
@@ -72,6 +73,37 @@ def classify_status(status: int) -> FailureKind | None:
     return _STATUS_FAILURES.get(status, "error")
 
 
+BODY_SNIPPET_LIMIT: Final = 300
+
+_CREDENTIAL_PARAMS: Final = frozenset({"apikey", "api_key", "app_key", "app_id", "key", "token"})
+
+
+def failure_detail(
+    url: str,
+    response: httpx.Response,
+    params: Mapping[str, str | int | float] | None = None,
+) -> str:
+    """Status plus the start of the provider's error body, never a credential.
+
+    "returned 403" was all the first real run recorded, and FMP's 403 body is
+    where it says *why* — a retired endpoint, an invalid key, a plan limit.
+    Any credential value the request carried is removed from the body before
+    it is kept, in case a provider echoes it back. Internal only
+    (`REQ-SEC-010`): this reaches `tool_invocations`, never a user.
+    """
+    try:
+        body = response.text
+    except (UnicodeDecodeError, httpx.ResponseNotRead):
+        body = ""
+    for name, value in (params or {}).items():
+        secret = str(value)
+        if name.lower() in _CREDENTIAL_PARAMS and secret:
+            body = body.replace(secret, "<redacted>")
+    snippet = " ".join(body.split())[:BODY_SNIPPET_LIMIT]
+    detail = f"{url} returned {response.status_code}"
+    return f"{detail}: {snippet}" if snippet else detail
+
+
 def failure(
     kind: FailureKind, message: str, tool: str, category: ToolCategory
 ) -> ToolFailure:
@@ -101,7 +133,7 @@ async def get_json(
 
     kind = classify_status(response.status_code)
     if kind is not None:
-        return None, kind, f"{url} returned {response.status_code}"
+        return None, kind, failure_detail(url, response, params)
 
     try:
         return response.json(), None, ""

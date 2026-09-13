@@ -175,6 +175,26 @@ class QuestionRepository:
             .all()
         )
 
+    def cited_urls(self, question_id: UUID) -> Sequence[str]:
+        """The URLs of the sources already answering one question.
+
+        A follow-up round reads these to look past them: the next search for a
+        question one source short should find a *different* source.
+        """
+        return [
+            url
+            for url in self._session.execute(
+                select(Source.url)
+                .join(Evidence, Evidence.source_id == Source.id)
+                .join(QuestionEvidence, QuestionEvidence.evidence_id == Evidence.id)
+                .where(QuestionEvidence.question_id == question_id)
+                .distinct()
+            )
+            .scalars()
+            .all()
+            if url
+        ]
+
     def coverage(self, version_id: UUID) -> dict[UUID, QuestionCoverage]:
         """Per-question source counts, for every question in the version.
 

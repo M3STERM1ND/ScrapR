@@ -42,7 +42,7 @@ from scrapr_core.db.repositories import (
 )
 from scrapr_core.domain.ownership import OwnerContext
 from scrapr_core.jobs import JobRunner
-from scrapr_core.llm import FakeLLMProvider
+from scrapr_core.llm import FakeLLMProvider, ProviderOutputTruncated
 from scrapr_core.llm.contract import ModelTier, StructuredResult, TokenUsage, UntrustedDocument
 from scrapr_core.observability import MeteredProvider, step_telemetry
 from scrapr_core.observability.report import build_report, render_text
@@ -210,6 +210,48 @@ async def test_the_metering_wrapper_changes_nothing_outside_a_step(
     assert telemetry.ledger.model_calls == 1
     assert telemetry.ledger.cost_micros == PricedProvider.PRICE
     assert telemetry.ledger.by_tier["standard"]["input"] == 120
+
+
+class TruncatingProvider(FakeLLMProvider):
+    """A model that thinks through its whole allowance and answers nothing."""
+
+    USAGE = TokenUsage(input_tokens=52_000, output_tokens=64_000, cost_micros=744_000)
+
+    async def complete_structured[T: BaseModel](
+        self,
+        instruction: Trusted,
+        untrusted: Sequence[UntrustedDocument],
+        schema: type[T],
+        model_tier: ModelTier = ModelTier.STANDARD,
+    ) -> StructuredResult[T]:
+        raise ProviderOutputTruncated(
+            "claude-sonnet-5 exhausted max_tokens=64000", model="claude-sonnet-5",
+            tier=model_tier, usage=self.USAGE,
+        )
+
+
+async def test_a_truncated_call_is_metered_before_it_propagates(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """Tokens a model generated before running out are billed like any other.
+    Dropping them would under-report exactly the calls that went wrong, and a
+    cost ceiling cannot limit spend it never sees."""
+    metered = MeteredProvider(TruncatingProvider())
+    spent: list[int] = []
+
+    class Budget:
+        def spend(self, *, cost_micros: int = 0, tool_calls: int = 0) -> None:
+            spent.append(cost_micros)
+
+    with session_factory() as session, step_telemetry(session, UUID(int=1), "synthesize") as telemetry:
+        telemetry.budget = Budget()
+        with pytest.raises(ProviderOutputTruncated):
+            await metered.complete_structured(Trusted("synthesize"), [], BaseModel)
+
+    assert telemetry.ledger.model_calls == 1
+    assert telemetry.ledger.output_tokens == 64_000
+    assert telemetry.ledger.cost_micros == 744_000
+    assert spent == [744_000]
 
 
 # --------------------------------------------------------------------------

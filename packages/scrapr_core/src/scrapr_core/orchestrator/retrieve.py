@@ -31,7 +31,7 @@ than half-written first.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import final
 from uuid import UUID
@@ -48,7 +48,10 @@ from scrapr_core.tools.contract import (
 )
 from scrapr_core.tools.registry import ToolRegistry
 
-__all__ = ["RetrievalCache", "RoundResult", "retrieve_area"]
+__all__ = ["PERMANENT_WITHIN_RUN", "RetrievalCache", "RoundResult", "retrieve_area"]
+
+PERMANENT_WITHIN_RUN: frozenset[str] = frozenset({"blocked", "paywalled", "not_found"})
+"""Failure kinds that asking again minutes later will not change."""
 
 
 @final
@@ -99,12 +102,15 @@ class RetrievalCache:
         return outcome
 
     def put(self, request: ToolRequest, outcome: ToolOutcome) -> None:
-        """Cache a *success* only.
+        """Cache a success, or a failure that cannot change within the run.
 
-        A failure is usually transient — a timeout, a rate limit — and caching
-        it would turn one bad moment into a run-long outage for that query.
+        A timeout, a rate limit or a server error is usually transient, and
+        caching it would turn one bad moment into a run-long outage for that
+        query. A rejected key, a paywall or a missing listing is not: the first
+        real run re-sent the same three 403s to FMP in its second round, which
+        spent calls and learned nothing.
         """
-        if isinstance(outcome, ToolResult):
+        if isinstance(outcome, ToolResult) or outcome.kind in PERMANENT_WITHIN_RUN:
             self._entries[self._key(request)] = (self._clock(), outcome)
 
 
@@ -129,6 +135,15 @@ class RoundResult:
     def had_any_success(self) -> bool:
         return any(not result.is_empty for result in self.results)
 
+    def merged(self, other: RoundResult) -> RoundResult:
+        """This round plus another for the same area — a fallback, say."""
+        return RoundResult(
+            area_name=self.area_name,
+            results=(*self.results, *other.results),
+            failures=(*self.failures, *other.failures),
+            skipped=(*self.skipped, *other.skipped),
+        )
+
 
 async def retrieve_area(
     area_name: str,
@@ -139,19 +154,26 @@ async def retrieve_area(
     cache: RetrievalCache,
     budget: ToolBudget | None = None,
     session_id: UUID | None = None,
+    params_for: Callable[[ToolCategory], Mapping[str, JsonValue]] | None = None,
 ) -> RoundResult:
     """Run one retrieval round across an area's categories.
 
     Every category is attempted once, in plan order, while budget remains. The
     budget is checked *before* each call, so an area stops before exceeding its
     reservation rather than after.
+
+    `params_for` shapes the request per category (`orchestrator.queries`): a
+    financial API wants a company and a ticker, not the research question.
+    Without it every category is sent `query`.
     """
     results: list[ToolResult] = []
     failures: list[ToolFailure] = []
     skipped: list[ToolCategory] = []
 
     for category in categories:
-        params: dict[str, JsonValue] = {"query": query}
+        params: dict[str, JsonValue] = (
+            dict(params_for(category)) if params_for is not None else {"query": query}
+        )
         if category is ToolCategory.DOCUMENTS and session_id is not None:
             params["session_id"] = str(session_id)
 

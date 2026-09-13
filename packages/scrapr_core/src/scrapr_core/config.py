@@ -54,6 +54,17 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
+    allow_fixtures: bool = Field(
+        default=False,
+        alias="SCRAPR_ALLOW_FIXTURES",
+        description=(
+            "Opt in to canned fixture tools for categories with no provider. "
+            "Honoured only outside production and only when no real AI provider "
+            "is configured: a run a real model reads is real research, and a "
+            "fixture in it is fabricated evidence."
+        ),
+    )
+
     web_origins: str = Field(
         default="http://localhost:3000",
         alias="WEB_ORIGINS",
@@ -206,7 +217,26 @@ class Settings(BaseSettings):
             problems.append("DATABASE_URL must set sslmode=require (or stricter) in production")
         if "local_dev_only" in self.storage_secret_key or "local_dev_only" in self.database_url:
             problems.append("the docker-compose development credentials must not reach production")
+        if self.allow_fixtures:
+            problems.append("SCRAPR_ALLOW_FIXTURES must not be set in production")
         return problems
+
+    @property
+    def fixtures_permitted(self) -> bool:
+        """Whether fixture tools may stand in for unserved categories.
+
+        Three conditions, all required. The opt-in is explicit because the
+        NVIDIA run showed what the implicit default did: a real model read a
+        canned "$1.2bn revenue" item and reported it as a Reuters filing. The
+        model check is what makes that impossible even with the flag set by
+        mistake — fixtures exist to exercise plumbing without spending money,
+        and a run with a real model is spending money on research.
+        """
+        return (
+            self.allow_fixtures
+            and self.scrapr_env != "production"
+            and not self.has_ai_provider
+        )
 
     def api_privilege_problems(self) -> list[str]:
         """Credentials the API process holds but never uses (`REQ-SEC-006`).

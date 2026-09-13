@@ -3,14 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ActivityTimeline } from "@/components/activity/ActivityTimeline";
+import { ConversationPanel } from "@/components/conversation/ConversationPanel";
 import { ReportView } from "@/components/report/ReportView";
 import {
   ApiError,
   getActivity,
   getResearch,
+  getMessages,
   getVersion,
   type ActivityEvent,
+  type Message,
   type ResearchSession,
+  type Source,
   type Version,
 } from "@/lib/api/client";
 
@@ -42,6 +46,7 @@ export function Workspace({ sessionId }: Props) {
   const [session, setSession] = useState<ResearchSession | null>(null);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [version, setVersion] = useState<Version | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Refs, not state: the loop reads them on every tick, and re-rendering on a
@@ -84,6 +89,13 @@ export function Workspace({ sessionId }: Props) {
           loadedVersion.current = latest.id;
           const loaded = await getVersion(sessionId, latest.version_number);
           if (!stopped) setVersion(loaded);
+
+          // The conversation comes back with the report (`REQ-CONV-007 AC-2`).
+          // Fetched here rather than in the panel so returning to saved
+          // research restores the transcript with everything else, in one
+          // pass, instead of the panel flashing empty and filling in.
+          const transcript = await getMessages(sessionId);
+          if (!stopped) setMessages(transcript);
         }
 
         // A tab left open on finished research should cost nothing.
@@ -149,6 +161,22 @@ export function Workspace({ sessionId }: Props) {
                 : "No report was produced. Nothing usable could be gathered for this question, so there is nothing to show rather than a report built on nothing."}
             </p>
           )}
+
+          {/* `REQ-WORK-007`: the conversation lives with the report, not on a
+              separate page. A question is about what the reader is looking at,
+              and making them navigate away to ask it breaks the context the
+              whole feature exists to preserve. Only once there is research to
+              interrogate. */}
+          {version ? (
+            <div className="mt-20">
+              <div className="hairline mb-10" />
+              <ConversationPanel
+                sessionId={sessionId}
+                initialMessages={messages}
+                sourceForEvidence={sourceForEvidence(version)}
+              />
+            </div>
+          ) : null}
         </div>
 
         <aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">
@@ -192,3 +220,25 @@ const STATUS_WORD: Record<ResearchSession["status"], string> = {
   partial: "Complete with gaps",
   failed: "Could not complete",
 };
+
+
+/**
+ * Evidence id to the source behind it.
+ *
+ * An answer cites *evidence* (`REQ-CONV-008 AC-1`) and a reader needs the
+ * source, so the mapping is built once here from what the version already
+ * carries rather than fetched again per turn.
+ */
+function sourceForEvidence(version: Version): Map<string, Source> {
+  const sources = new Map(version.sources.map((source) => [source.id, source]));
+  const byEvidence = new Map<string, Source>();
+
+  for (const claim of version.claims) {
+    for (const item of claim.evidence) {
+      const source = sources.get(item.source_id);
+      if (source) byEvidence.set(item.id, source);
+    }
+  }
+
+  return byEvidence;
+}

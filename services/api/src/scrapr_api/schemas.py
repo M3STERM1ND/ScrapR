@@ -24,8 +24,10 @@ from scrapr_core.db.enums import (
     ClaimType,
     ConflictCause,
     ConflictStatus,
+    MessageRole,
     ResearchStatus,
     VersionStatus,
+    VizKind,
 )
 
 __all__ = [
@@ -214,6 +216,57 @@ class VersionOut(BaseModel):
     claims: list[ClaimOut]
     sources: list[SourceOut]
     conflicts: list[ConflictOut]
+    visualizations: list[VisualizationOut]
+
+
+class MessageOut(BaseModel):
+    """One conversation turn (`REQ-CONV-007`)."""
+
+    id: UUID
+    seq: int
+    role: MessageRole
+    content: str
+    claim_type: ClaimType | None
+    """How the answer is typed (`REQ-CONV-008 AC-2`). Null on a user turn: the
+    taxonomy describes what the agent asserted, not what was asked."""
+
+    evidence_ids: list[UUID]
+    """What the answer cited (`REQ-CONV-008 AC-1`). Resolves against the
+    version's evidence, so an answer inspects the same way a claim does."""
+
+    created_at: dt.datetime
+
+
+class AskIn(BaseModel):
+    """A follow-up question."""
+
+    question: str = Field(min_length=1, max_length=2000)
+    context_ref: dict[str, str] | None = None
+    """What the reader was pointing at, if anything (`REQ-CONV-002`)."""
+
+
+class AskOut(BaseModel):
+    """The turn pair a question produces."""
+
+    question: MessageOut
+    answer: MessageOut
+    researched: bool
+    """Whether answering required fresh retrieval (`REQ-CONV-003`). Surfaced so
+    the client can say the research grew rather than leaving the reader to
+    notice new sources appearing."""
+
+
+class VisualizationOut(BaseModel):
+    """A chart or table, as a spec the client renders (`DEC-11`)."""
+
+    id: UUID
+    section_id: UUID
+    kind: VizKind
+    spec: dict[str, object]
+    ordering: int
+    evidence_ids: list[UUID]
+    """`REQ-VIZ-004 AC-1`: a chart exposes the sources of its data, and `AC-2`
+    requires all of them when it combines several."""
 
 
 class ActivityEventOut(BaseModel):

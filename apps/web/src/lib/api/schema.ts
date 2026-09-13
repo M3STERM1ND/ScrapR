@@ -93,6 +93,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/research/{session_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Messages
+         * @description The conversation so far (`REQ-CONV-007 AC-2`).
+         *
+         *     Ownership-scoped like everything else: a conversation is about someone's
+         *     research and `REQ-SEC-002` does not stop applying because the surface is a
+         *     chat.
+         */
+        get: operations["get_messages_v1_research__session_id__messages_get"];
+        put?: never;
+        /**
+         * Ask
+         * @description Ask a follow-up, and answer it from the research (`REQ-CONV-001`).
+         *
+         *     Answered synchronously, unlike a research run. A question against evidence
+         *     already gathered is one model call, and pushing it through `run_steps`
+         *     would make the reader wait on a poll for something that takes a second.
+         *
+         *     **Follow-up research is the exception, and it is deliberately not done
+         *     here.** `REQ-CONV-003` requires fresh retrieval when the evidence is
+         *     insufficient, and retrieval belongs to the pipeline — it needs the budget,
+         *     the tool registry, the termination gate and the activity stream, none of
+         *     which a request handler should own. So the intent is classified, the answer
+         *     says plainly that new research is needed, and enqueuing that run is the
+         *     next piece of work. Answering "I researched that" without having done so
+         *     would be the one thing this product must never do.
+         */
+        post: operations["ask_v1_research__session_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/research/{session_id}/versions/{version_number}": {
         parameters: {
             query?: never;
@@ -155,6 +196,28 @@ export interface components {
          * @enum {string}
          */
         ActivityStatus: "in_progress" | "complete" | "failed";
+        /**
+         * AskIn
+         * @description A follow-up question.
+         */
+        AskIn: {
+            /** Context Ref */
+            context_ref?: {
+                [key: string]: string;
+            } | null;
+            /** Question */
+            question: string;
+        };
+        /**
+         * AskOut
+         * @description The turn pair a question produces.
+         */
+        AskOut: {
+            answer: components["schemas"]["MessageOut"];
+            question: components["schemas"]["MessageOut"];
+            /** Researched */
+            researched: boolean;
+        };
         /**
          * AuthorityTier
          * @description Source authority (`REQ-EVID-002`). Assignment rules are `OPEN-15`.
@@ -332,6 +395,36 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * MessageOut
+         * @description One conversation turn (`REQ-CONV-007`).
+         */
+        MessageOut: {
+            claim_type: components["schemas"]["ClaimType"] | null;
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            role: components["schemas"]["MessageRole"];
+            /** Seq */
+            seq: number;
+        };
+        /**
+         * MessageRole
+         * @description Author of a conversation message (`REQ-CONV-007`).
+         * @enum {string}
+         */
+        MessageRole: "user" | "agent";
+        /**
          * ResearchSessionOut
          * @description The session header the workspace renders around (`REQ-WORK-002`).
          */
@@ -462,6 +555,8 @@ export interface components {
             status: components["schemas"]["VersionStatus"];
             /** Version Number */
             version_number: number;
+            /** Visualizations */
+            visualizations: components["schemas"]["VisualizationOut"][];
         };
         /**
          * VersionStatus
@@ -490,6 +585,37 @@ export interface components {
             /** Version Number */
             version_number: number;
         };
+        /**
+         * VisualizationOut
+         * @description A chart or table, as a spec the client renders (`DEC-11`).
+         */
+        VisualizationOut: {
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            kind: components["schemas"]["VizKind"];
+            /** Ordering */
+            ordering: number;
+            /**
+             * Section Id
+             * Format: uuid
+             */
+            section_id: string;
+            /** Spec */
+            spec: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * VizKind
+         * @description Visualization forms (`REQ-VIZ-001`). The renderer is `OPEN-25`.
+         * @enum {string}
+         */
+        VizKind: "line" | "bar" | "table" | "matrix" | "metric" | "comparison";
     };
     responses: never;
     parameters: never;
@@ -611,6 +737,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_messages_v1_research__session_id__messages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: {
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_v1_research__session_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: {
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskOut"];
                 };
             };
             /** @description Validation Error */

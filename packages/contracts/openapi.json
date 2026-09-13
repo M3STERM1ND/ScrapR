@@ -74,6 +74,58 @@
         "title": "ActivityStatus",
         "type": "string"
       },
+      "AskIn": {
+        "description": "A follow-up question.",
+        "properties": {
+          "context_ref": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Ref"
+          },
+          "question": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "AskIn",
+        "type": "object"
+      },
+      "AskOut": {
+        "description": "The turn pair a question produces.",
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/MessageOut"
+          },
+          "question": {
+            "$ref": "#/components/schemas/MessageOut"
+          },
+          "researched": {
+            "title": "Researched",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "question",
+          "answer",
+          "researched"
+        ],
+        "title": "AskOut",
+        "type": "object"
+      },
       "AuthorityTier": {
         "description": "Source authority (`REQ-EVID-002`). Assignment rules are `OPEN-15`.",
         "enum": [
@@ -458,6 +510,70 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "MessageOut": {
+        "description": "One conversation turn (`REQ-CONV-007`).",
+        "properties": {
+          "claim_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "role",
+          "content",
+          "claim_type",
+          "evidence_ids",
+          "created_at"
+        ],
+        "title": "MessageOut",
+        "type": "object"
+      },
+      "MessageRole": {
+        "description": "Author of a conversation message (`REQ-CONV-007`).",
+        "enum": [
+          "user",
+          "agent"
+        ],
+        "title": "MessageRole",
+        "type": "string"
+      },
       "ResearchSessionOut": {
         "description": "The session header the workspace renders around (`REQ-WORK-002`).",
         "properties": {
@@ -761,6 +877,13 @@
           "version_number": {
             "title": "Version Number",
             "type": "integer"
+          },
+          "visualizations": {
+            "items": {
+              "$ref": "#/components/schemas/VisualizationOut"
+            },
+            "title": "Visualizations",
+            "type": "array"
           }
         },
         "required": [
@@ -773,7 +896,8 @@
           "sections",
           "claims",
           "sources",
-          "conflicts"
+          "conflicts",
+          "visualizations"
         ],
         "title": "VersionOut",
         "type": "object"
@@ -831,6 +955,64 @@
         ],
         "title": "VersionSummary",
         "type": "object"
+      },
+      "VisualizationOut": {
+        "description": "A chart or table, as a spec the client renders (`DEC-11`).",
+        "properties": {
+          "evidence_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/VizKind"
+          },
+          "ordering": {
+            "title": "Ordering",
+            "type": "integer"
+          },
+          "section_id": {
+            "format": "uuid",
+            "title": "Section Id",
+            "type": "string"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "title": "Spec",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "section_id",
+          "kind",
+          "spec",
+          "ordering",
+          "evidence_ids"
+        ],
+        "title": "VisualizationOut",
+        "type": "object"
+      },
+      "VizKind": {
+        "description": "Visualization forms (`REQ-VIZ-001`). The renderer is `OPEN-25`.",
+        "enum": [
+          "line",
+          "bar",
+          "table",
+          "matrix",
+          "metric",
+          "comparison"
+        ],
+        "title": "VizKind",
+        "type": "string"
       }
     }
   },
@@ -1053,6 +1235,138 @@
           }
         },
         "summary": "Get Activity",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/v1/research/{session_id}/messages": {
+      "get": {
+        "description": "The conversation so far (`REQ-CONV-007 AC-2`).\n\nOwnership-scoped like everything else: a conversation is about someone's\nresearch and `REQ-SEC-002` does not stop applying because the surface is a\nchat.",
+        "operationId": "get_messages_v1_research__session_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MessageOut"
+                  },
+                  "title": "Response Get Messages V1 Research  Session Id  Messages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Messages",
+        "tags": [
+          "research"
+        ]
+      },
+      "post": {
+        "description": "Ask a follow-up, and answer it from the research (`REQ-CONV-001`).\n\nAnswered synchronously, unlike a research run. A question against evidence\nalready gathered is one model call, and pushing it through `run_steps`\nwould make the reader wait on a poll for something that takes a second.\n\n**Follow-up research is the exception, and it is deliberately not done\nhere.** `REQ-CONV-003` requires fresh retrieval when the evidence is\ninsufficient, and retrieval belongs to the pipeline \u2014 it needs the budget,\nthe tool registry, the termination gate and the activity stream, none of\nwhich a request handler should own. So the intent is classified, the answer\nsays plainly that new research is needed, and enqueuing that run is the\nnext piece of work. Answering \"I researched that\" without having done so\nwould be the one thing this product must never do.",
+        "operationId": "ask_v1_research__session_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask",
         "tags": [
           "research"
         ]

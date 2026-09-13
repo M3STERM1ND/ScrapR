@@ -31,6 +31,9 @@ export type Source = Schemas["SourceOut"];
 export type Conflict = Schemas["ConflictOut"];
 export type ConflictSide = Schemas["ConflictSideOut"];
 export type EvidenceItem = Schemas["EvidenceOut"];
+export type Message = Schemas["MessageOut"];
+export type AskResult = Schemas["AskOut"];
+export type VisualizationSpec = Schemas["VisualizationOut"];
 export type ActivityEvent = Schemas["ActivityEventOut"];
 export type ActivityPage = Schemas["ActivityPage"];
 
@@ -138,3 +141,22 @@ type UsedPath =
   | "/v1/research/{session_id}/activity";
 const _pathsExist: UsedPath extends KnownPaths ? true : never = true;
 void _pathsExist;
+
+/** The conversation so far (`REQ-CONV-007 AC-2`). */
+export function getMessages(sessionId: string): Promise<Message[]> {
+  return request<Message[]>(`/v1/research/${sessionId}/messages`);
+}
+
+/**
+ * Ask a follow-up (`REQ-CONV-001`).
+ *
+ * Answered synchronously, unlike starting research: a question against
+ * evidence already gathered is one model call, and polling for it would make
+ * the reader wait on machinery built for a job that takes minutes.
+ */
+export function ask(sessionId: string, question: string): Promise<AskResult> {
+  return request<AskResult>(`/v1/research/${sessionId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
+}

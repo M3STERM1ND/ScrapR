@@ -26,6 +26,8 @@ import sys
 from dataclasses import replace
 from types import FrameType
 
+import anthropic
+
 from scrapr_core.config import Settings, get_settings
 from scrapr_core.db.engine import build_engine, build_session_factory
 from scrapr_core.jobs import JobRunner
@@ -70,6 +72,13 @@ def build_provider(settings: Settings) -> LLMProvider:
         # each model accepts rather than preferences — Haiku rejects `effort`
         # whoever names it in an environment variable.
         return AnthropicProvider(
+            # The key comes from settings, not from the ambient environment.
+            # `pydantic-settings` reads `.env` into the Settings object without
+            # exporting it to `os.environ`, so a zero-argument client finds
+            # nothing and fails on the first call rather than at startup —
+            # which is the worst possible place for a credential problem to
+            # surface.
+            client=anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key),
             profiles={
                 tier: replace(DEFAULT_PROFILES[tier], model=model)
                 for tier, model in (

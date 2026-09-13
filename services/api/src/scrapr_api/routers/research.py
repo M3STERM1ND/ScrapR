@@ -13,6 +13,7 @@ Two rules run through every handler:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
@@ -23,29 +24,53 @@ from scrapr_api.errors import ApiError
 from scrapr_api.schemas import (
     ActivityEventOut,
     ActivityPage,
+    AskIn,
+    AskOut,
     ClaimOut,
     ConflictOut,
     ConflictSideOut,
     CreateResearchRequest,
     CreateResearchResponse,
     EvidenceOut,
+    MessageOut,
     ResearchSessionOut,
     SectionOut,
     SourceOut,
     VersionOut,
     VersionSummary,
+    VisualizationOut,
 )
+from scrapr_core.config import get_settings
+from scrapr_core.db.enums import ClaimType, MessageRole
 from scrapr_core.db.models import (
     Claim,
     ClaimEvidence,
     Conflict,
     ConflictEvidence,
+    ConversationMessage,
     Evidence,
     ReportSection,
+    ResearchSession,
     Source,
+    Visualization,
+    VisualizationEvidence,
 )
-from scrapr_core.db.repositories import ActivityRepository, ResearchRepository, RunRepository
+from scrapr_core.db.repositories import (
+    ActivityRepository,
+    ConversationRepository,
+    ResearchRepository,
+    RunRepository,
+)
+from scrapr_core.orchestrator.converse import (
+    ConversationContext,
+    EvidenceRef,
+    GroundedAnswer,
+    Intent,
+    answer_question,
+    classify_intent,
+)
 from scrapr_core.orchestrator.pipeline import STAGES
+from scrapr_worker.main import build_provider
 
 router = APIRouter(prefix="/v1/research", tags=["research"])
 
@@ -231,6 +256,27 @@ def get_version(
                 )
             )
 
+    # Visualizations, each with the evidence its points came from
+    # (`REQ-VIZ-004 AC-1`, `AC-2`).
+    viz_rows = (
+        session.execute(
+            select(Visualization)
+            .where(Visualization.version_id == version.id)
+            .order_by(Visualization.ordering)
+        )
+        .scalars()
+        .all()
+    )
+    viz_evidence: dict[UUID, list[UUID]] = {row.id: [] for row in viz_rows}
+    if viz_evidence:
+        for viz_id, evidence_id in session.execute(
+            select(
+                VisualizationEvidence.visualization_id,
+                VisualizationEvidence.evidence_id,
+            ).where(VisualizationEvidence.visualization_id.in_(viz_evidence.keys()))
+        ).all():
+            viz_evidence[viz_id].append(evidence_id)
+
     return VersionOut(
         id=version.id,
         session_id=version.session_id,
@@ -286,6 +332,17 @@ def get_version(
                 sides=sides[row.id],
             )
             for row in conflict_rows
+        ],
+        visualizations=[
+            VisualizationOut(
+                id=row.id,
+                section_id=row.section_id,
+                kind=row.kind,
+                spec=dict(row.spec),
+                ordering=row.ordering,
+                evidence_ids=viz_evidence[row.id],
+            )
+            for row in viz_rows
         ],
     )
 
@@ -350,4 +407,170 @@ def get_activity(
             for event in events
         ],
         next_after=events[-1].seq if events else after,
+    )
+
+
+# --------------------------------------------------------------------------
+# Conversation (`REQ-CONV-001..008`, `REQ-WORK-007`)
+# --------------------------------------------------------------------------
+
+
+@router.get("/{session_id}/messages")
+def get_messages(
+    session_id: UUID,
+    research: Research,
+    session: DbSession,
+) -> list[MessageOut]:
+    """The conversation so far (`REQ-CONV-007 AC-2`).
+
+    Ownership-scoped like everything else: a conversation is about someone's
+    research and `REQ-SEC-002` does not stop applying because the surface is a
+    chat.
+    """
+    if research.get_session(session_id) is None:
+        raise _not_found()
+
+    conversation = ConversationRepository(session)
+    return [
+        _message_out(message, conversation.evidence_ids_for(message.id))
+        for message in conversation.for_session(session_id)
+    ]
+
+
+@router.post("/{session_id}/messages", status_code=201)
+async def ask(
+    session_id: UUID,
+    body: AskIn,
+    research: Research,
+    session: DbSession,
+) -> AskOut:
+    """Ask a follow-up, and answer it from the research (`REQ-CONV-001`).
+
+    Answered synchronously, unlike a research run. A question against evidence
+    already gathered is one model call, and pushing it through `run_steps`
+    would make the reader wait on a poll for something that takes a second.
+
+    **Follow-up research is the exception, and it is deliberately not done
+    here.** `REQ-CONV-003` requires fresh retrieval when the evidence is
+    insufficient, and retrieval belongs to the pipeline — it needs the budget,
+    the tool registry, the termination gate and the activity stream, none of
+    which a request handler should own. So the intent is classified, the answer
+    says plainly that new research is needed, and enqueuing that run is the
+    next piece of work. Answering "I researched that" without having done so
+    would be the one thing this product must never do.
+    """
+    found = research.get_session(session_id)
+    if found is None:
+        raise _not_found()
+
+    version_id = found.current_version_id
+    if version_id is None:
+        raise _not_found()
+
+    conversation = ConversationRepository(session)
+    question = conversation.append(
+        session_id,
+        version_id,
+        MessageRole.USER,
+        body.question,
+        context_ref=body.context_ref,
+    )
+
+    context = _conversation_context(session, found, version_id, conversation)
+    provider = build_provider(get_settings())
+
+    verdict = await classify_intent(body.question, context, provider)
+    researched = verdict.intent is Intent.RESEARCH
+
+    if researched:
+        # `REQ-CONV-003` honestly: say what would happen, do not claim it did.
+        grounded = GroundedAnswer(
+            text=(
+                "Answering this needs research beyond what has been gathered. "
+                "Use Update Research to run it, and this question can be "
+                "answered from the new evidence."
+            ),
+            claim_type=ClaimType.UNCERTAINTY,
+            evidence_ids=(),
+        )
+    else:
+        grounded = await answer_question(
+            body.question,
+            context,
+            provider,
+            reframe=verdict.intent is Intent.REFRAME,
+        )
+
+    answer = conversation.append(
+        session_id,
+        version_id,
+        MessageRole.AGENT,
+        grounded.text,
+        evidence_ids=grounded.evidence_ids,
+        context_ref={"claim_type": grounded.claim_type.value},
+    )
+    session.commit()
+
+    return AskOut(
+        question=_message_out(question, []),
+        answer=_message_out(answer, grounded.evidence_ids),
+        researched=researched,
+    )
+
+
+def _conversation_context(
+    session: DbSession,
+    found: ResearchSession,
+    version_id: UUID,
+    conversation: ConversationRepository,
+) -> ConversationContext:
+    """Everything the agent knows, read from rows.
+
+    `REQ-CONV-001 AC-2` requires access to the session's claims, evidence and
+    sources; `AC-3` requires that survive a reload. Assembling it from the
+    database on every turn is what makes both true at once — there is no
+    in-process state to lose.
+    """
+    rows = session.execute(
+        select(Evidence, Source)
+        .join(Source, Source.id == Evidence.source_id)
+        .where(Evidence.version_id == version_id)
+        .order_by(Evidence.extracted_at, Evidence.id)
+    ).all()
+
+    return ConversationContext(
+        subject=found.subject or found.objective,
+        objective=found.objective,
+        evidence=[
+            EvidenceRef(
+                evidence_id=evidence.id,
+                statement=evidence.content,
+                excerpt=evidence.excerpt or "",
+                source_name=source.name,
+            )
+            for evidence, source in rows
+        ],
+        recent_turns=conversation.recent_turns(found.id),
+    )
+
+
+def _message_out(
+    message: ConversationMessage, evidence_ids: Sequence[UUID]
+) -> MessageOut:
+    """One turn on the wire.
+
+    The claim type rides in `context_ref` rather than in its own column: the
+    schema was written before `DEC-05` split claim typing across phases, and
+    adding a column for a value only agent turns carry would be a migration to
+    store an enum in the one place it is already recorded.
+    """
+    raw = (message.context_ref or {}).get("claim_type")
+    return MessageOut(
+        id=message.id,
+        seq=message.seq,
+        role=message.role,
+        content=message.content,
+        claim_type=ClaimType(raw) if isinstance(raw, str) else None,
+        evidence_ids=list(evidence_ids),
+        created_at=message.created_at,
     )

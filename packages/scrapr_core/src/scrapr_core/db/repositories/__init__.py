@@ -14,6 +14,7 @@ from scrapr_core.db.repositories.anonymous_sessions import (
     IssuedSession,
     hash_session_token,
 )
+from scrapr_core.db.repositories.conversation import ConversationRepository
 from scrapr_core.db.repositories.evidence import EvidenceRepository
 from scrapr_core.db.repositories.questions import QuestionCoverage, QuestionRepository
 from scrapr_core.db.repositories.research import ResearchRepository
@@ -22,6 +23,7 @@ from scrapr_core.db.repositories.runs import RunRepository
 __all__ = [
     "ActivityRepository",
     "AnonymousSessionRepository",
+    "ConversationRepository",
     "EvidenceRepository",
     "IssuedSession",
     "QuestionCoverage",

@@ -30,6 +30,50 @@ services:
       retries: 30
       start_period: 5s
 
+  # Object storage, S3-compatible (`DEC-12`). The application speaks the S3 API
+  # and nothing else, so this is the same client production uses against R2 —
+  # only the endpoint and credentials differ. Implementation plan §13 asks for
+  # local development to run on "Postgres and storage", and an upload path that
+  # exists only in production is one nobody tests.
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: scrapr-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: scrapr
+      MINIO_ROOT_PASSWORD: scrapr_local_dev_only
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  # Creates the bucket and exits. Without this, a fresh clone would need a
+  # console visit before the first upload — which is exactly the manual setup
+  # step this compose file exists to avoid.
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: scrapr-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 scrapr scrapr_local_dev_only &&
+      mc mb --ignore-existing local/scrapr-uploads &&
+      mc anonymous set none local/scrapr-uploads &&
+      echo 'bucket ready, private'
+      "
+
 volumes:
   postgres_data:
     name: scrapr_postgres_data
+  minio_data:
+    name: scrapr_minio_data

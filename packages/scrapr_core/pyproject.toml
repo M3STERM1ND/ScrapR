@@ -17,6 +17,15 @@ dependencies = [
     # structured output and the thinking parameters differ per model and
     # the SDK is what tracks them.
     "anthropic>=0.40",
+    # `DEC-12`: the S3 API is the storage contract, so one client serves both
+    # MinIO locally and R2 in production.
+    "boto3>=1.35",
+    # `DEC-14` extraction, one library per format. All pure-Python and all
+    # small; a scanned PDF that yields no text is a failed upload, not an OCR
+    # dependency (`REQ-DOC-004 AC-3`).
+    "pypdf>=5.1",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
 ]
 
 [build-system]

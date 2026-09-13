@@ -30,6 +30,11 @@ dev = [
     "pytest-cov>=6.0",
     "mypy>=1.14",
     "ruff>=0.9",
+    # Stubs for the Phase 4 extraction and storage libraries. `mypy --strict`
+    # covers `scrapr_core` with no escape hatches, and an untyped boto3 call is
+    # exactly the kind of thing that surface exists to catch.
+    "boto3-stubs[s3]>=1.35",
+    "types-openpyxl>=3.1",
 ]
 
 # ---------------------------------------------------------------------------

@@ -56,7 +56,7 @@ rather than a refactor.
 | Python | 3.12+ | `uv` will fetch one if you have none |
 | uv | 0.5+ | Python dependency and workspace management |
 | Node | 20+ | for `apps/web` |
-| Docker | any recent | local Postgres only |
+| Docker | any recent | local Postgres and object storage |
 
 ---
 
@@ -66,9 +66,9 @@ rather than a refactor.
 # 1. Python workspace
 uv sync --group dev
 
-# 2. Local Postgres
+# 2. Local Postgres and object storage
 cp .env.example .env
-docker compose up -d
+docker compose up -d               # Postgres, MinIO, and the bucket
 uv run alembic upgrade head        # never runs automatically on boot
 
 # 3. Frontend
@@ -125,7 +125,15 @@ cd apps/web && npm run generate:api                  # regenerate TS types
 
 Tests marked `integration` need the Postgres from `docker compose`; they run
 against a scratch `scrapr_test` database and skip, rather than fail, if no
-server is reachable.
+server is reachable. The upload and storage suites likewise skip when MinIO is
+not running.
+
+`docker compose up -d` is the whole storage setup. A `minio-init` container
+creates the `scrapr-uploads` bucket and sets it private, so there is nothing to
+click through in a console and no step to forget — and a bucket that was
+private on every developer machine is one that cannot be public in production by
+habit (`REQ-SEC-005 AC-1`). Its console is on http://localhost:9001 if you want
+to look at what was uploaded; the credentials are the ones in `.env.example`.
 
 ---
 

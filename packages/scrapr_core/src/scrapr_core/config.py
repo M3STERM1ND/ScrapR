@@ -4,9 +4,10 @@ One settings object for the whole system. The API, the worker and Alembic all
 read the same values from the same place, so a developer machine and CI cannot
 disagree about which database is being migrated.
 
-Provider settings arrive as their questions close. `DEC-06` closed `OPEN-04`
-and `DEC-07` closed `OPEN-05..09`, so the keys for those six are here.
-`OPEN-10` (object storage) is still open and has nothing to configure.
+Provider settings arrive as their questions close. `DEC-06` closed `OPEN-04`,
+`DEC-07` closed `OPEN-05..09`, and `DEC-12` and `DEC-13` closed `OPEN-10` and
+`OPEN-19`, so the keys for those six providers plus storage and the upload
+limits are all here.
 
 **Every provider key is optional, and that is deliberate.** A missing key means
 that category does not register, and the run reports it as a gap the same way
@@ -98,6 +99,41 @@ class Settings(BaseSettings):
             "what gates the filings category instead."
         ),
     )
+
+    # ------------------------------------------------------------------
+    # Object storage — `DEC-12`, closing `OPEN-10`
+    # ------------------------------------------------------------------
+
+    storage_endpoint_url: str = Field(
+        default="http://localhost:9000",
+        alias="STORAGE_ENDPOINT_URL",
+        description=(
+            "S3 API endpoint. MinIO locally, empty for real AWS S3, the R2 "
+            "account endpoint in production. The client is the same either "
+            "way, which is the whole point of `DEC-12`."
+        ),
+    )
+    storage_bucket: str = Field(default="scrapr-uploads", alias="STORAGE_BUCKET")
+    storage_access_key: str = Field(default="scrapr", alias="STORAGE_ACCESS_KEY")
+    storage_secret_key: str = Field(
+        default="scrapr_local_dev_only", alias="STORAGE_SECRET_KEY"
+    )
+    storage_region: str = Field(default="auto", alias="STORAGE_REGION")
+    """`auto` is what R2 expects; MinIO ignores it. A real AWS bucket needs its
+    actual region."""
+
+    # ------------------------------------------------------------------
+    # Upload limits — `DEC-13`, closing `OPEN-19`
+    # ------------------------------------------------------------------
+
+    max_upload_bytes: int = Field(default=25 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
+    max_uploads_per_session: int = Field(default=10, alias="MAX_UPLOADS_PER_SESSION")
+    max_session_upload_bytes: int = Field(
+        default=100 * 1024 * 1024, alias="MAX_SESSION_UPLOAD_BYTES"
+    )
+    """Deliberately less than `max_upload_bytes` times the count: the per-file
+    limit is what one document plausibly is, the session limit is what will be
+    processed for one run (`DEC-13`)."""
 
     @property
     def has_ai_provider(self) -> bool:

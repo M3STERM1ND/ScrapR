@@ -24,6 +24,7 @@ default tolerance rather than a guess that looks like a measurement.
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -38,6 +39,7 @@ __all__ = [
     "NormalizedValue",
     "classify_metric",
     "normalize_value",
+    "parse_period",
 ]
 
 
@@ -237,3 +239,32 @@ def normalize_value(text: str, *, currency_hint: str | None = None) -> Normalize
         currency=currency,
         is_percentage=is_percentage,
     )
+
+
+def parse_period(raw: object) -> tuple[dt.date | None, dt.date | None]:
+    """A provider's period string as a date range (`REQ-EVID-009 AC-1`).
+
+    Two shapes, because two providers say it differently: FMP reports a fiscal
+    year (`"2025"`), EDGAR a period end (`"2025-12-31"`). A bare year becomes
+    the whole calendar year, which is the honest reading — the filing covers
+    it, and pretending to know the fiscal year-end when the provider did not
+    say would be inventing precision.
+
+    Anything unparseable returns `(None, None)` rather than raising. A figure
+    with no period is compared against nothing (`DEC-10 §4.1`), which is a
+    weaker outcome than a wrong period and a much safer one.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None, None
+
+    text = raw.strip()
+
+    if len(text) == 4 and text.isdigit():
+        year = int(text)
+        return dt.date(year, 1, 1), dt.date(year, 12, 31)
+
+    try:
+        parsed = dt.date.fromisoformat(text[:10])
+    except ValueError:
+        return None, None
+    return None, parsed

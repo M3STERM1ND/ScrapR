@@ -131,8 +131,17 @@ class Evidence(Base):
         pg_enum(NormalizationStatus, "normalization_status")
     )
 
+    value_basis: Mapped[str | None]
+    """`'reported'` or `'estimate'`, as the provider stated it
+    (`REQ-TOOL-004 AC-3`). `DEC-10 §4.2` reads it: an estimate disagreeing with
+    a filed figure is not a conflict, and without this there is no way to tell
+    the two apart."""
+
     period_start: Mapped[dt.date | None]
     period_end: Mapped[dt.date | None]
+    """The fiscal period a figure covers (`REQ-EVID-009 AC-1`). `DEC-10 §4.1`
+    compares only within a period, so a value with none is compared against
+    nothing rather than against a different year."""
     period_label: Mapped[str | None]
     """As published: `"FY2025"`, `"Q3 2025"`. Kept alongside the resolved dates
     because a period mismatch is a named conflict cause (`REQ-EVID-013`)."""

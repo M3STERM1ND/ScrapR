@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import final
 
 from scrapr_core.db.enums import Accessibility, SourceCategory
+from scrapr_core.domain.json import JsonMapping
 from scrapr_core.security.trust import SourceRef, Untrusted
 from scrapr_core.tools.contract import (
     FailureKind,
@@ -46,12 +47,19 @@ def fixture_item(
     retrieved_at: dt.datetime | None = None,
     published_at: dt.datetime | None = None,
     accessibility: Accessibility = Accessibility.ACCESSIBLE,
+    structured: JsonMapping | None = None,
 ) -> ToolItem:
     """Build one fixture item, wrapping its text as `Untrusted`.
 
     A helper rather than a literal in every fixture, so that no fixture can
     accidentally be authored with trusted-looking content: the wrapping is not
     optional here either.
+
+    `structured` carries provider-native fields — a reporting period, a
+    currency, whether a figure was reported or estimated. Real tools supply
+    them and the pipeline reads them, so a fixture that could not would be
+    unable to exercise the conflict exclusions that depend on them
+    (`DEC-10 §4`).
     """
     locator = source_url or source_identifier or source_name
     return ToolItem(
@@ -63,6 +71,7 @@ def fixture_item(
         source_url=source_url,
         source_identifier=source_identifier,
         published_at=published_at,
+        structured=structured,
     )
 
 

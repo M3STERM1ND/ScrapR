@@ -38,7 +38,9 @@ __all__ = [
     "default_synthesis",
     "disputed_registry",
     "disputing_provider",
+    "estimate_registry",
     "fixture_registry",
+    "period_split_registry",
     "run_pipeline",
     "scripted_provider",
     "search_tool",
@@ -289,3 +291,68 @@ def cite_everything(evidence_ids: Sequence[UUID]) -> SynthesisDraft:
         ],
         sections=[],
     )
+
+
+def period_split_registry() -> ToolRegistry:
+    """Two figures that differ because they cover different years.
+
+    `DEC-10 §4.1` says this is not a conflict, and until the reporting period
+    was actually persisted that exclusion could not fire — the comparison had
+    no period to exclude on, so FY2024 and FY2025 revenue looked like two
+    sources contradicting each other.
+    """
+    registry = ToolRegistry()
+    registry.register(
+        FixtureTool(
+            name="fixture_periods",
+            category=ToolCategory.WEB_SEARCH,
+            items=(
+                fixture_item(
+                    source_name="reuters.com FY2024",
+                    text="Acme Corp reported revenue of USD 1.2bn for fiscal 2024.",
+                    source_url="https://reuters.com/acme/fy2024",
+                    structured={"period": "2024", "currency": "USD", "basis": "reported"},
+                ),
+                fixture_item(
+                    source_name="reuters.com FY2025",
+                    text="Acme Corp reported revenue of USD 1.9bn for fiscal 2025.",
+                    source_url="https://reuters.com/acme/fy2025",
+                    structured={"period": "2025", "currency": "USD", "basis": "reported"},
+                ),
+            ),
+        )
+    )
+    registry.freeze()
+    return registry
+
+
+def estimate_registry() -> ToolRegistry:
+    """A filed figure and an analyst estimate of the same period.
+
+    `DEC-10 §4.2`: an estimate disagreeing with a reported value is not a
+    source being wrong. `REQ-TOOL-004 AC-3` is what makes it detectable, and
+    the basis had nowhere to live until migration `0003`.
+    """
+    registry = ToolRegistry()
+    registry.register(
+        FixtureTool(
+            name="fixture_basis",
+            category=ToolCategory.WEB_SEARCH,
+            items=(
+                fixture_item(
+                    source_name="reuters.com filed",
+                    text="Acme Corp reported revenue of USD 1.2bn for fiscal 2025.",
+                    source_url="https://reuters.com/acme/filed",
+                    structured={"period": "2025", "currency": "USD", "basis": "reported"},
+                ),
+                fixture_item(
+                    source_name="reuters.com estimate",
+                    text="Acme Corp reported revenue of USD 1.9bn for fiscal 2025.",
+                    source_url="https://reuters.com/acme/estimate",
+                    structured={"period": "2025", "currency": "USD", "basis": "estimate"},
+                ),
+            ),
+        )
+    )
+    registry.freeze()
+    return registry

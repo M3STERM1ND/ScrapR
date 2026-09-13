@@ -111,6 +111,21 @@ class _Cited:
         `DEC-10 §4.2` needs this: an estimate disagreeing with a filed figure
         is not a conflict, and without the field there is no way to tell.
         """
+        return self.evidence.value_basis
+
+    @property
+    def period(self) -> str | None:
+        """The fiscal period this figure covers, as a comparison key.
+
+        `DEC-10 §4.1` compares only within a period, so this is what stops
+        FY2024 revenue being reported as disagreeing with FY2025 revenue. A
+        value with no period returns `None`, which the comparison reads as
+        "cannot be excluded on period" rather than as a match.
+        """
+        if self.evidence.period_end is not None:
+            return self.evidence.period_end.isoformat()
+        if self.evidence.period_start is not None:
+            return self.evidence.period_start.isoformat()
         return None
 
     @property
@@ -183,6 +198,8 @@ def _detect(
         outcome = compare(
             left.normalized,
             right.normalized,
+            left_period=left.period,
+            right_period=right.period,
             left_basis=left.basis,
             right_basis=right.basis,
         )

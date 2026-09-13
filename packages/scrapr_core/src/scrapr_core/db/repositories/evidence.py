@@ -31,8 +31,9 @@ from sqlalchemy.orm import Session
 from scrapr_core.db.base import utcnow
 from scrapr_core.db.enums import AuthorityTier
 from scrapr_core.db.models import Evidence, Source
+from scrapr_core.domain.json import JsonValue
 from scrapr_core.evidence.dedupe import normalize_url
-from scrapr_core.evidence.normalize import normalize_value
+from scrapr_core.evidence.normalize import normalize_value, parse_period
 from scrapr_core.evidence.tiering import assign_tier
 from scrapr_core.tools.contract import ToolItem
 
@@ -140,6 +141,14 @@ class EvidenceRepository:
         # cannot be normalised is marked rather than guessed at (`AC-2`,
         # `AC-3`).
         normalized = normalize_value(statement, currency_hint=_currency_hint(item))
+        period_start, period_end = parse_period(_structured(item, "period"))
+        if period_start is None and period_end is None:
+            # EDGAR spells it differently from FMP. Reading both here rather
+            # than making every provider agree on a key keeps the tool layer
+            # free to describe its own payload.
+            period_start, period_end = parse_period(
+                _structured(item, "period_ending")
+            )
 
         evidence = Evidence(
             version_id=version_id,
@@ -151,6 +160,12 @@ class EvidenceRepository:
             value_normalized=normalized.value if normalized.comparable else None,
             currency=normalized.currency,
             normalization=normalized.status,
+            # `REQ-TOOL-004 AC-3` and `REQ-EVID-009 AC-1`. Both were being
+            # reported by the providers and dropped on the floor, which left
+            # two of `DEC-10 §4`'s three conflict exclusions unable to fire.
+            value_basis=_basis(item),
+            period_start=period_start,
+            period_end=period_end,
             extracted_at=utcnow(),
         )
         self._session.add(evidence)
@@ -165,6 +180,26 @@ class EvidenceRepository:
             .scalars()
             .all()
         )
+
+
+def _structured(item: ToolItem, key: str) -> JsonValue:
+    """One field of a provider's structured payload, or `None`."""
+    structured = item.structured
+    return structured.get(key) if structured else None
+
+
+def _basis(item: ToolItem) -> str | None:
+    """Whether the provider called this figure reported or estimated.
+
+    Null when it said nothing. `DEC-10 §4.2` treats an absent basis as unknown
+    rather than assuming "reported": assuming would make a real estimate
+    comparable against a filed figure, which is the exact false conflict the
+    exclusion exists to prevent.
+    """
+    basis = _structured(item, "basis")
+    if isinstance(basis, str) and basis.strip():
+        return basis.strip().lower()
+    return None
 
 
 def _currency_hint(item: ToolItem) -> str | None:

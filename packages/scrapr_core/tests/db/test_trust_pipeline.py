@@ -426,3 +426,118 @@ async def test_a_contested_claim_is_not_high_confidence(
     contested = [claim for claim in facts if claim.confidence_inputs.get("conflicts")]
     assert contested, "no claim ended up carrying the conflict"
     assert all(claim.confidence == "low" for claim in contested)
+
+
+# --------------------------------------------------------------------------
+# The exclusions, through the pipeline
+# --------------------------------------------------------------------------
+
+
+async def test_a_reporting_period_reaches_the_evidence_row(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-009 AC-1`: a financial figure carries its fiscal period.
+
+    The columns existed from the baseline schema and were never written. `AC-2`
+    (period shown on citation inspection) cannot hold without this, and
+    `DEC-10 §4.1` cannot exclude on a period that was thrown away.
+    """
+    from pipeline_support import period_split_registry
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        period_split_registry(),
+        disputing_provider(),
+        synthesis=cite_everything,
+    )
+
+    with session_factory() as session:
+        rows = session.execute(select(Evidence)).scalars().all()
+
+    dated = [row for row in rows if row.period_end is not None]
+    assert dated, "no evidence carried a reporting period"
+
+
+async def test_different_periods_do_not_produce_a_conflict(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`DEC-10 §4.1`, in production rather than in a unit test.
+
+    FY2024 revenue and FY2025 revenue differ by 58% and are both correct. The
+    unit test for this passed the whole time — it supplied the periods by hand,
+    which the pipeline did not.
+    """
+    from pipeline_support import period_split_registry
+
+    from scrapr_core.db.models import Conflict
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        period_split_registry(),
+        disputing_provider(),
+        synthesis=cite_everything,
+    )
+
+    with session_factory() as session:
+        conflicts = session.execute(select(Conflict)).scalars().all()
+
+    assert not conflicts, "two different years were reported as a disagreement"
+
+
+async def test_an_estimate_against_a_reported_figure_is_not_a_conflict(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`DEC-10 §4.2`, likewise.
+
+    `_Cited.basis` returned `None` unconditionally — a stub carrying a
+    docstring that described behaviour it did not have, which is worse than an
+    obvious gap because it reads as finished.
+    """
+    from pipeline_support import estimate_registry
+
+    from scrapr_core.db.models import Conflict
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        estimate_registry(),
+        disputing_provider(),
+        synthesis=cite_everything,
+    )
+
+    with session_factory() as session:
+        conflicts = session.execute(select(Conflict)).scalars().all()
+        rows = session.execute(select(Evidence)).scalars().all()
+
+    assert {row.value_basis for row in rows} == {"reported", "estimate"}
+    assert not conflicts, "an analyst estimate was reported as contradicting a filing"
+
+
+async def test_two_reported_figures_in_one_period_still_conflict(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """The control for the two tests above.
+
+    Both exclusions narrow what counts as a disagreement, so each needs a case
+    proving it did not simply switch conflict detection off.
+    """
+    from scrapr_core.db.models import Conflict
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        disputed_registry(),
+        disputing_provider(),
+        synthesis=cite_everything,
+    )
+
+    with session_factory() as session:
+        conflicts = session.execute(select(Conflict)).scalars().all()
+
+    assert conflicts, "the exclusions disabled detection entirely"

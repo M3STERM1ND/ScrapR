@@ -171,6 +171,8 @@ export interface components {
             confidence: string | null;
             /** Confidence Rationale */
             confidence_rationale: string | null;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceOut"][];
             /**
              * Id
              * Format: uuid
@@ -291,6 +293,38 @@ export interface components {
             version_id: string;
             /** Version Number */
             version_number: number;
+        };
+        /**
+         * EvidenceOut
+         * @description One piece of evidence behind a claim, as the inspector shows it.
+         *
+         *     `REQ-EVID-019 AC-1` names what inspection must show, and "the relevant
+         *     evidence" is the item the payload did not carry: source, tier and retrieval
+         *     time were all reachable through `source_ids`, but the *excerpt* — the words
+         *     the source actually printed — existed only in the database.
+         *
+         *     That excerpt is the whole point of the citation surface. A reader checking
+         *     a claim is checking it against what was written, not against a link.
+         */
+        EvidenceOut: {
+            /** Excerpt */
+            excerpt: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Reporting Period */
+            reporting_period: string | null;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Statement */
+            statement: string;
+            /** Value Raw */
+            value_raw: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

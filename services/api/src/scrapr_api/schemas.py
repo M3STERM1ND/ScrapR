@@ -104,6 +104,34 @@ class SourceOut(BaseModel):
     published_at: dt.datetime | None
 
 
+class EvidenceOut(BaseModel):
+    """One piece of evidence behind a claim, as the inspector shows it.
+
+    `REQ-EVID-019 AC-1` names what inspection must show, and "the relevant
+    evidence" is the item the payload did not carry: source, tier and retrieval
+    time were all reachable through `source_ids`, but the *excerpt* — the words
+    the source actually printed — existed only in the database.
+
+    That excerpt is the whole point of the citation surface. A reader checking
+    a claim is checking it against what was written, not against a link.
+    """
+
+    id: UUID
+    source_id: UUID
+    statement: str
+    """The extracted fact, in ScrapR's words."""
+
+    excerpt: str | None
+    """The verbatim span that supports it (`REQ-EVID-007`), checked against the
+    source at extraction time so it cannot be a paraphrase."""
+
+    value_raw: str | None
+    """The figure exactly as published, where the evidence carries one."""
+
+    reporting_period: str | None
+    """`REQ-EVID-019 AC-1`: the period, where applicable."""
+
+
 class ConflictSideOut(BaseModel):
     """One value in a disagreement, with what a reader needs to judge it.
 
@@ -157,6 +185,10 @@ class ClaimOut(BaseModel):
     one of them beside the citation would be worse than printing none."""
     is_important: bool
     source_ids: list[UUID]
+    evidence: list[EvidenceOut]
+    """What the claim rests on (`REQ-EVID-019 AC-1`). Inline on the claim
+    rather than in a version-level list, because `AC-2` requires inspection be
+    available *at the claim*, not only in a separate bibliography."""
 
 
 class SectionOut(BaseModel):

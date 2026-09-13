@@ -324,6 +324,37 @@
   color: var(--color-ink-muted);
 }
 
+/* ---- Citation inspection (`REQ-EVID-019`, `REQ-WORK-006`) ---- */
+
+/* A native `<details>`, so inspection is keyboard reachable and screen-reader
+   announced without a line of JavaScript. `AC-2` wants it inline in the report
+   rather than in a bibliography, and `REQ-WORK-006 AC-1` wants it reachable
+   without leaving the section: a disclosure is both, and it collapses back so
+   the report still reads as a report. */
+@utility inspect-toggle {
+  font-size: var(--text-micro);
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+@utility inspect-toggle-open {
+  color: var(--color-ink-soft);
+}
+
+@utility inspect-panel {
+  border-left: 1px solid var(--color-line);
+  padding-left: 1rem;
+}
+
+/* The verbatim span the source printed. Set apart from ScrapR's own words,
+   because the whole value of `REQ-EVID-007` is that a reader can tell which is
+   which. */
+@utility inspect-excerpt {
+  color: var(--color-ink-soft);
+  font-style: italic;
+}
+
 /* ---- Conflict (`REQ-WORK-009`) ---- */
 
 /* A disagreement is a feature of the report, not an error in it. Set apart by

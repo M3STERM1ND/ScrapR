@@ -2574,7 +2574,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 | `OPEN-10` | Which object storage provider? `websitedesign.md` says "S3-compatible object storage", which names an API surface rather than a vendor and does **not** answer this. See implementation plan `N-05`. | Phase 1 | Both |
 | `OPEN-11` | Which authentication mechanism or provider? | Phase 5 | B |
 | `OPEN-12` | Does V1 actually need vector search, or is it deferrable? If needed, confirm a PostgreSQL extension suffices (`REQ-TECH-007`). | Phase 1 (decide), Phase 4 (deliver) | A |
-| `OPEN-25` | Which chart rendering approach, and how are charts rendered server-side for export? | Phase 3, Phase 7 | B |
+| ~~`OPEN-25`~~ | **Closed by `DEC-11`**, 2026-09-12. Hand-authored inline SVG from a renderer-agnostic spec, so one spec renders in the workspace and in a headless export without a browser in the pipeline. Also defines the product's semantic token layer (implementation plan §11.4). See `docs/decisions/OPEN-25.md`. | — | — |
 
 ### 13.2 Data source selection
 

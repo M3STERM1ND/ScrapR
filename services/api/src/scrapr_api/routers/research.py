@@ -28,6 +28,7 @@ from scrapr_api.schemas import (
     ConflictSideOut,
     CreateResearchRequest,
     CreateResearchResponse,
+    EvidenceOut,
     ResearchSessionOut,
     SectionOut,
     SourceOut,
@@ -167,16 +168,34 @@ def get_version(
     # `REQ-EVID-009 AC-2`: the reporting period travels with the citation, so a
     # reader inspecting a figure can see which year it covers.
     periods: dict[UUID, set[str]] = {claim.id: set() for claim in claims}
+    # The evidence itself, not just which sources it came from
+    # (`REQ-EVID-019 AC-1`). One query for the whole version: a report with
+    # forty claims would otherwise be forty round trips, and `NFR-PERF-004`
+    # asks for one response.
+    supporting: dict[UUID, list[EvidenceOut]] = {claim.id: [] for claim in claims}
     rows = session.execute(
-        select(ClaimEvidence.claim_id, Evidence.source_id, Evidence.period_end)
+        select(ClaimEvidence.claim_id, Evidence)
         .join(Evidence, Evidence.id == ClaimEvidence.evidence_id)
         .where(ClaimEvidence.claim_id.in_(citations.keys()))
+        .order_by(Evidence.extracted_at, Evidence.id)
     ).all()
-    for claim_id, source_id, period_end in rows:
-        if source_id not in citations[claim_id]:
-            citations[claim_id].append(source_id)
-        if period_end is not None:
-            periods[claim_id].add(period_end.isoformat())
+    for claim_id, evidence in rows:
+        if evidence.source_id not in citations[claim_id]:
+            citations[claim_id].append(evidence.source_id)
+        if evidence.period_end is not None:
+            periods[claim_id].add(evidence.period_end.isoformat())
+        supporting[claim_id].append(
+            EvidenceOut(
+                id=evidence.id,
+                source_id=evidence.source_id,
+                statement=evidence.content,
+                excerpt=evidence.excerpt,
+                value_raw=_reported_value(evidence) if evidence.value_raw else None,
+                reporting_period=(
+                    evidence.period_end.isoformat() if evidence.period_end else None
+                ),
+            )
+        )
 
     # Conflicts, with both sides and the source behind each (`REQ-WORK-009
     # AC-1`). Loaded in one pass for the same reason the citation map is: a
@@ -241,6 +260,7 @@ def get_version(
                 reporting_period=_single_period(periods[claim.id]),
                 is_important=claim.is_important,
                 source_ids=citations[claim.id],
+                evidence=supporting[claim.id],
             )
             for claim in claims
         ],

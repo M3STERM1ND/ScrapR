@@ -531,3 +531,32 @@ async def test_a_conflict_reaches_the_client_with_both_sides(
     for side in conflict["sides"]:
         assert side["source_id"] in known
         assert side["value"]
+
+
+async def test_a_claim_carries_the_evidence_behind_it(
+    client: TestClient,
+    registry: ToolRegistry,
+    provider: FakeLLMProvider,
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-019 AC-1`: inspection shows the relevant evidence.
+
+    Source, tier and retrieval time were always reachable through
+    `source_ids`. The excerpt — the words the source actually printed — was
+    only in the database, and it is the one thing a reader checking a claim is
+    actually checking against.
+    """
+    created = start(client)
+
+    await run_pipeline(session_factory, registry, provider)
+
+    body = client.get(f"/v1/research/{created['session_id']}/versions/1").json()
+
+    cited = [claim for claim in body["claims"] if claim["source_ids"]]
+    assert cited, "no claim cited anything"
+
+    for claim in cited:
+        assert claim["evidence"], f"claim has sources but no evidence: {claim['text']}"
+        for item in claim["evidence"]:
+            assert item["statement"]
+            assert item["source_id"] in {s["id"] for s in body["sources"]}

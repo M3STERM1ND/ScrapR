@@ -1,4 +1,10 @@
-import type { Claim, Conflict, Source, Version } from "@/lib/api/client";
+import type {
+  Claim,
+  Conflict,
+  EvidenceItem,
+  Source,
+  Version,
+} from "@/lib/api/client";
 
 /**
  * A version, rendered (`REQ-WORK-003..005`).
@@ -19,6 +25,13 @@ import type { Claim, Conflict, Source, Version } from "@/lib/api/client";
  * the word, filled and hollow marks, and weight. **Source tier** sits beside
  * every citation (`REQ-EVID-003 AC-2`), because a claim rated moderate should
  * let the reader see *why* rather than asking them to trust the rating.
+ *
+ * Phase 3 adds **inline citation inspection** (`REQ-EVID-019`,
+ * `REQ-WORK-006`): every claim opens to show the evidence under it, each
+ * excerpt beside the source that printed it, its tier, when it was read and
+ * the period it covers. A native `<details>` rather than a modal, because
+ * `AC-1` asks that inspection be reachable without leaving the section and a
+ * disclosure collapses back so the report still reads as a report.
  *
  * And **conflicts are shown, not hidden** (`REQ-WORK-009`). Both values appear
  * with their source, the explanation appears where one exists, and where none
@@ -204,6 +217,113 @@ function ClaimBlock({
           ))}
         </ul>
       ) : null}
+
+      {claim.evidence.length > 0 ? (
+        <ClaimInspector claim={claim} sourcesById={sourcesById} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Everything a reader needs to check a claim (`REQ-EVID-019`).
+ *
+ * `AC-1` lists it: source, tier, retrieval time, the relevant evidence,
+ * confidence, and the reporting period where applicable. The evidence is the
+ * part that matters most and the part that was missing — a link tells you
+ * where to look, an excerpt tells you what was written.
+ *
+ * `AC-3` puts conflicting evidence in this same surface, which it already is:
+ * the conflict panel sits directly above, on the same claim.
+ */
+function ClaimInspector({
+  claim,
+  sourcesById,
+}: {
+  claim: Claim;
+  sourcesById: Map<string, Source>;
+}) {
+  return (
+    <details className="mt-3">
+      <summary className="inspect-toggle">
+        Inspect {claim.evidence.length}{" "}
+        {claim.evidence.length === 1 ? "source" : "sources"}
+      </summary>
+
+      <div className="inspect-panel mt-3 flex flex-col gap-4">
+        {claim.evidence.map((item) => (
+          <EvidenceDetail
+            key={item.id}
+            item={item}
+            source={sourcesById.get(item.source_id)}
+          />
+        ))}
+
+        {claim.confidence_rationale ? (
+          /* Why the level, not just the level. `REQ-DATA-012` wants the
+             reasoning reconstructable, and it is generated from the same
+             inputs as the level so it cannot disagree with it. */
+          <p className="text-micro text-ink-muted">
+            Confidence: {claim.confidence_rationale}
+          </p>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function EvidenceDetail({
+  item,
+  source,
+}: {
+  item: EvidenceItem;
+  source: Source | undefined;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      {item.excerpt ? (
+        /* The verbatim span, checked against the source at extraction so it
+           cannot be a paraphrase (`REQ-EVID-007`). Quoted, because a reader
+           has to be able to tell the source's words from ScrapR's. */
+        <p className="inspect-excerpt text-micro">
+          &ldquo;{item.excerpt}&rdquo;
+        </p>
+      ) : null}
+
+      <p className="text-micro text-ink-muted">{item.statement}</p>
+
+      <p className="text-micro text-ink-muted">
+        {source ? (
+          <>
+            {source.url ? (
+              <a
+                href={source.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-ochre-deep underline decoration-line-strong underline-offset-4"
+              >
+                {source.name}
+              </a>
+            ) : (
+              <span>{source.name}</span>
+            )}
+            {". "}
+            <span className="tier-tag">
+              {TIER_WORD[source.authority_tier] ?? source.authority_tier}
+            </span>
+            {". "}
+            <span className="tnum">Read {formatDate(source.retrieved_at)}</span>
+            {item.reporting_period ? (
+              <>
+                {". "}
+                <span className="tnum">
+                  Period ending {formatDate(item.reporting_period)}
+                </span>
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </p>
     </div>
   );
 }

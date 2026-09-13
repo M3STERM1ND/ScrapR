@@ -112,6 +112,13 @@
             ],
             "title": "Confidence Rationale"
           },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOut"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -153,7 +160,8 @@
           "confidence_rationale",
           "reporting_period",
           "is_important",
-          "source_ids"
+          "source_ids",
+          "evidence"
         ],
         "title": "ClaimOut",
         "type": "object"
@@ -373,6 +381,68 @@
           "version_number"
         ],
         "title": "CreateResearchResponse",
+        "type": "object"
+      },
+      "EvidenceOut": {
+        "description": "One piece of evidence behind a claim, as the inspector shows it.\n\n`REQ-EVID-019 AC-1` names what inspection must show, and \"the relevant\nevidence\" is the item the payload did not carry: source, tier and retrieval\ntime were all reachable through `source_ids`, but the *excerpt* \u2014 the words\nthe source actually printed \u2014 existed only in the database.\n\nThat excerpt is the whole point of the citation surface. A reader checking\na claim is checking it against what was written, not against a link.",
+        "properties": {
+          "excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excerpt"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reporting_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reporting Period"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "value_raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Raw"
+          }
+        },
+        "required": [
+          "id",
+          "source_id",
+          "statement",
+          "excerpt",
+          "value_raw",
+          "reporting_period"
+        ],
+        "title": "EvidenceOut",
         "type": "object"
       },
       "HTTPValidationError": {

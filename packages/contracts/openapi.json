@@ -121,6 +121,17 @@
             "title": "Is Important",
             "type": "boolean"
           },
+          "reporting_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reporting Period"
+          },
           "source_ids": {
             "items": {
               "format": "uuid",
@@ -140,6 +151,7 @@
           "claim_type",
           "confidence",
           "confidence_rationale",
+          "reporting_period",
           "is_important",
           "source_ids"
         ],

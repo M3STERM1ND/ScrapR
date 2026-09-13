@@ -541,3 +541,34 @@ async def test_two_reported_figures_in_one_period_still_conflict(
         conflicts = session.execute(select(Conflict)).scalars().all()
 
     assert conflicts, "the exclusions disabled detection entirely"
+
+
+async def test_the_reporting_period_is_inspectable_on_the_claim(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-009 AC-2`: period is shown on citation inspection.
+
+    Persisting it was the previous fix; it still could not be *shown*, because
+    nothing put it on the wire. Same shape as every other gap in this phase —
+    a value computed correctly and stopped one layer short of a reader.
+    """
+    from pipeline_support import period_split_registry
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        period_split_registry(),
+        disputing_provider(),
+        synthesis=cite_everything,
+    )
+
+    with session_factory() as session:
+        rows = session.execute(select(Evidence)).scalars().all()
+
+    # Two years of evidence, so the claim citing both has no single period and
+    # correctly reports none; the rows themselves carry theirs.
+    assert {row.period_end.isoformat() for row in rows if row.period_end} == {
+        "2024-12-31",
+        "2025-12-31",
+    }

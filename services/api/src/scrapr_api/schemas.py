@@ -149,6 +149,12 @@ class ClaimOut(BaseModel):
     confidence_rationale: str | None
     """Why it got that level (`REQ-DATA-012`). Generated from the same inputs
     as the level itself, so it cannot drift from what it explains."""
+    reporting_period: str | None
+    """The fiscal period this claim's figures cover (`REQ-EVID-009 AC-2`).
+
+    Null when the evidence carries no period, and null when it carries more
+    than one: a claim drawing on two years has no single period, and printing
+    one of them beside the citation would be worse than printing none."""
     is_important: bool
     source_ids: list[UUID]
 

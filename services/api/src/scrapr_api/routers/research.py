@@ -164,14 +164,19 @@ def get_version(
     # Built in one query rather than per claim, because a report with forty
     # claims would otherwise be forty round trips.
     citations: dict[UUID, list[UUID]] = {claim.id: [] for claim in claims}
+    # `REQ-EVID-009 AC-2`: the reporting period travels with the citation, so a
+    # reader inspecting a figure can see which year it covers.
+    periods: dict[UUID, set[str]] = {claim.id: set() for claim in claims}
     rows = session.execute(
-        select(ClaimEvidence.claim_id, Evidence.source_id)
+        select(ClaimEvidence.claim_id, Evidence.source_id, Evidence.period_end)
         .join(Evidence, Evidence.id == ClaimEvidence.evidence_id)
         .where(ClaimEvidence.claim_id.in_(citations.keys()))
     ).all()
-    for claim_id, source_id in rows:
+    for claim_id, source_id, period_end in rows:
         if source_id not in citations[claim_id]:
             citations[claim_id].append(source_id)
+        if period_end is not None:
+            periods[claim_id].add(period_end.isoformat())
 
     # Conflicts, with both sides and the source behind each (`REQ-WORK-009
     # AC-1`). Loaded in one pass for the same reason the citation map is: a
@@ -230,6 +235,7 @@ def get_version(
                 claim_type=claim.claim_type,
                 confidence=claim.confidence,
                 confidence_rationale=_rationale(claim),
+                reporting_period=_single_period(periods[claim.id]),
                 is_important=claim.is_important,
                 source_ids=citations[claim.id],
             )
@@ -259,6 +265,17 @@ def get_version(
             for row in conflict_rows
         ],
     )
+
+
+def _single_period(found: set[str]) -> str | None:
+    """The one period a claim's figures cover, or nothing.
+
+    A claim citing two years has no single period, and showing one of them
+    would tell the reader something untrue about the other. `DEC-10 §4.1`
+    already refuses to compare across periods; this refuses to label across
+    them.
+    """
+    return next(iter(found)) if len(found) == 1 else None
 
 
 def _rationale(claim: Claim) -> str | None:

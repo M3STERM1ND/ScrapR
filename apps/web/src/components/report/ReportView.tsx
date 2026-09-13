@@ -177,6 +177,16 @@ function ClaimBlock({
       </div>
       <p className="measure mt-2 text-body">{claim.text}</p>
 
+      {/* `REQ-EVID-009 AC-2`: which period the figures cover, beside the claim
+          they support. Absent when the evidence spans more than one year,
+          because labelling a two-year claim with one of them would be wrong
+          about the other. */}
+      {claim.reporting_period ? (
+        <p className="mt-1 text-micro text-ink-muted">
+          Covers the period ending {formatDate(claim.reporting_period)}
+        </p>
+      ) : null}
+
       {conflicts.map((conflict) => (
         <ConflictBlock
           key={conflict.id}

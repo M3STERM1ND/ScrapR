@@ -178,6 +178,8 @@ export interface components {
             id: string;
             /** Is Important */
             is_important: boolean;
+            /** Reporting Period */
+            reporting_period: string | null;
             /** Source Ids */
             source_ids: string[];
             /** Text */

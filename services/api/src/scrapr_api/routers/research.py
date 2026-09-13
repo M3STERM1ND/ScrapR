@@ -41,7 +41,7 @@ from scrapr_api.schemas import (
     VisualizationOut,
 )
 from scrapr_core.config import get_settings
-from scrapr_core.db.enums import ClaimType, MessageRole, RunKind
+from scrapr_core.db.enums import ClaimType, MessageRole, RunKind, SourceCategory
 from scrapr_core.db.models import (
     Claim,
     ClaimEvidence,
@@ -114,10 +114,46 @@ def create_research(
     if version is None:  # pragma: no cover - we just created it as this owner
         raise _not_found()
 
-    RunRepository(session).create_run(created.id, version.id, STAGES)
+    if not body.defer_start:
+        RunRepository(session).create_run(created.id, version.id, STAGES)
 
     return CreateResearchResponse(
         session_id=created.id,
+        version_id=version.id,
+        version_number=version.version_number,
+    )
+
+
+@router.post("/{session_id}/start", status_code=status.HTTP_202_ACCEPTED)
+def start_research(
+    session_id: UUID,
+    research: Research,
+    session: DbSession,
+) -> CreateResearchResponse:
+    """Enqueue the run for a session created with `defer_start`.
+
+    **Idempotent.** A session that already has a run is returned unchanged
+    rather than given a second one: this is the call a client retries after a
+    dropped connection, and two runs against one version would produce two sets
+    of claims in the same report.
+    """
+    found = research.get_session(session_id)
+    if found is None:
+        raise _not_found()
+
+    # `latest_version`, never `open_version`: the version was created alongside
+    # the session and opening another here would give the session two, each
+    # with its own run, and the reader a report assembled from both.
+    version = research.latest_version(session_id)
+    if version is None:  # pragma: no cover - creation always opens version 1
+        raise _not_found()
+
+    runs = RunRepository(session)
+    if not runs.has_run_for_version(version.id):
+        runs.create_run(session_id, version.id, STAGES)
+
+    return CreateResearchResponse(
+        session_id=session_id,
         version_id=version.id,
         version_number=version.version_number,
     )
@@ -236,9 +272,10 @@ def get_version(
     )
     sides: dict[UUID, list[ConflictSideOut]] = {row.id: [] for row in conflict_rows}
     if sides:
-        for conflict_id, evidence, label in session.execute(
-            select(ConflictEvidence.conflict_id, Evidence, ConflictEvidence.label)
+        for conflict_id, evidence, label, side_source in session.execute(
+            select(ConflictEvidence.conflict_id, Evidence, ConflictEvidence.label, Source)
             .join(Evidence, Evidence.id == ConflictEvidence.evidence_id)
+            .join(Source, Source.id == Evidence.source_id)
             .where(ConflictEvidence.conflict_id.in_(sides.keys()))
         ).all():
             sides[conflict_id].append(
@@ -246,6 +283,11 @@ def get_version(
                     evidence_id=evidence.id,
                     source_id=evidence.source_id,
                     label=label,
+                    source_name=side_source.name,
+                    # `REQ-DOC-007 AC-2`.
+                    from_your_document=(
+                        side_source.category is SourceCategory.DOCUMENT
+                    ),
                     # The reported form, never the normalised one
                     # (`REQ-EVID-008 AC-2`): a reader comparing two values must
                     # see what each source actually published. The currency is
@@ -319,6 +361,11 @@ def get_version(
                 authority_tier=source.authority_tier,
                 retrieved_at=source.retrieved_at,
                 published_at=source.published_at,
+                # `REQ-DOC-008 AC-2`. Without these two the frontend sees a
+                # source with a name and no URL and has no way to tell the
+                # reader's own file apart from an unlinkable web result.
+                category=source.category,
+                upload_id=source.upload_id,
             )
             for source in sources
         ],

@@ -134,6 +134,113 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/research/{session_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Research
+         * @description Enqueue the run for a session created with `defer_start`.
+         *
+         *     **Idempotent.** A session that already has a run is returned unchanged
+         *     rather than given a second one: this is the call a client retries after a
+         *     dropped connection, and two runs against one version would produce two sets
+         *     of claims in the same report.
+         */
+        post: operations["start_research_v1_research__session_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/research/{session_id}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Uploads
+         * @description Every file attached to this session, with its processing state.
+         *
+         *     This is what `REQ-DOC-003 AC-1` is rendered from. Polled by the intake
+         *     panel while anything is still processing, which is why it is cheap: one
+         *     indexed query and a count per row.
+         */
+        get: operations["list_uploads_v1_research__session_id__uploads_get"];
+        put?: never;
+        /**
+         * Create Upload Ticket
+         * @description Reserve a slot and sign a URL for one file.
+         *
+         *     **201, not 200**: this creates the `uploads` row. The row exists before the
+         *     bytes do, which is what lets the count limit hold — a client that presigns
+         *     ten tickets and uploads none has used its ten.
+         */
+        post: operations["create_upload_ticket_v1_research__session_id__uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/research/{session_id}/uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Upload
+         * @description Remove a file and its extracted text (`REQ-SEC-008 AC-2`).
+         *
+         *     The chunks go with the row, immediately: they are the searchable copy, and
+         *     a deleted document that can still be retrieved as evidence is not deleted.
+         *     The object is removed next. If storage refuses, the row still goes — the
+         *     user's instruction is honoured and the orphaned object is a cleanup
+         *     problem, not a privacy one that waits on a retry.
+         */
+        delete: operations["delete_upload_v1_research__session_id__uploads__upload_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/research/{session_id}/uploads/{upload_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete Upload
+         * @description Confirm the bytes arrived, and queue the file for reading.
+         *
+         *     The size is read back from storage and re-checked, which is the second half
+         *     of `REQ-DOC-010 AC-1`. A file that is over the limit — or that never
+         *     arrived — leaves no usable row behind.
+         */
+        post: operations["complete_upload_v1_research__session_id__uploads__upload_id__complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/research/{session_id}/versions/{version_number}": {
         parameters: {
             query?: never;
@@ -307,6 +414,8 @@ export interface components {
              * Format: uuid
              */
             evidence_id: string;
+            /** From Your Document */
+            from_your_document: boolean;
             /** Label */
             label: string | null;
             /**
@@ -314,6 +423,8 @@ export interface components {
              * Format: uuid
              */
             source_id: string;
+            /** Source Name */
+            source_name: string;
             /** Value */
             value: string;
         };
@@ -334,6 +445,11 @@ export interface components {
             context_ticker?: string | null;
             /** Context Url */
             context_url?: string | null;
+            /**
+             * Defer Start
+             * @default false
+             */
+            defer_start: boolean;
             /** Instructions */
             instructions?: string | null;
             /** Objective */
@@ -482,6 +598,12 @@ export interface components {
             title: string;
         };
         /**
+         * SourceCategory
+         * @description Which tool category produced the source (`REQ-TOOL-002..007`).
+         * @enum {string}
+         */
+        SourceCategory: "filing" | "financial" | "news" | "jobs" | "web" | "official" | "document";
+        /**
          * SourceOut
          * @description Where a claim's evidence came from, and when it was read.
          *
@@ -490,6 +612,7 @@ export interface components {
          */
         SourceOut: {
             authority_tier: components["schemas"]["AuthorityTier"];
+            category: components["schemas"]["SourceCategory"];
             /**
              * Id
              * Format: uuid
@@ -506,8 +629,85 @@ export interface components {
              * Format: date-time
              */
             retrieved_at: string;
+            /** Upload Id */
+            upload_id?: string | null;
             /** Url */
             url: string | null;
+        };
+        /**
+         * UploadOut
+         * @description One attached file as the intake panel shows it (`REQ-DOC-003`).
+         */
+        UploadOut: {
+            /** Chunk Count */
+            chunk_count: number;
+            /** Content Type */
+            content_type: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error */
+            error: string | null;
+            /** Filename */
+            filename: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Size Bytes */
+            size_bytes: number;
+            state: components["schemas"]["UploadState"];
+        };
+        /**
+         * UploadState
+         * @description Document processing lifecycle (`REQ-DOC-003..004`).
+         * @enum {string}
+         */
+        UploadState: "pending" | "processing" | "ready" | "failed";
+        /**
+         * UploadTicket
+         * @description Where to PUT the bytes, and until when.
+         *
+         *     The URL is a short-lived write grant to one key (`DEC-12`). The API never
+         *     sees the file: the browser uploads directly, which is implementation plan
+         *     §10 and the reason a 25 MB file does not have to fit through a request
+         *     handler.
+         */
+        UploadTicket: {
+            /** Content Type */
+            content_type: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Upload Id
+             * Format: uuid
+             */
+            upload_id: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * UploadTicketRequest
+         * @description Ask for permission to upload one file.
+         *
+         *     The size is what the *client* says it is. It is checked here so an
+         *     oversized file is refused before it is transferred rather than after
+         *     (`REQ-DOC-010 AC-2`), and checked again at completion against the object
+         *     that actually arrived, because a declared size is not a limit.
+         */
+        UploadTicketRequest: {
+            /** Content Type */
+            content_type: string;
+            /** Filename */
+            filename: string;
+            /** Size Bytes */
+            size_bytes: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -807,6 +1007,175 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_research_v1_research__session_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: {
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateResearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_uploads_v1_research__session_id__uploads_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: {
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_upload_ticket_v1_research__session_id__uploads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: {
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_upload_v1_research__session_id__uploads__upload_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                upload_id: string;
+            };
+            cookie?: {
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_upload_v1_research__session_id__uploads__upload_id__complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                upload_id: string;
+            };
+            cookie?: {
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadOut"];
                 };
             };
             /** @description Validation Error */

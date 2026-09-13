@@ -306,6 +306,10 @@
             "title": "Evidence Id",
             "type": "string"
           },
+          "from_your_document": {
+            "title": "From Your Document",
+            "type": "boolean"
+          },
           "label": {
             "anyOf": [
               {
@@ -322,6 +326,10 @@
             "title": "Source Id",
             "type": "string"
           },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
           "value": {
             "title": "Value",
             "type": "string"
@@ -331,7 +339,9 @@
           "evidence_id",
           "source_id",
           "label",
-          "value"
+          "value",
+          "source_name",
+          "from_your_document"
         ],
         "title": "ConflictSideOut",
         "type": "object"
@@ -383,6 +393,11 @@
               }
             ],
             "title": "Context Url"
+          },
+          "defer_start": {
+            "default": false,
+            "title": "Defer Start",
+            "type": "boolean"
           },
           "instructions": {
             "anyOf": [
@@ -706,11 +721,28 @@
         "title": "SectionOut",
         "type": "object"
       },
+      "SourceCategory": {
+        "description": "Which tool category produced the source (`REQ-TOOL-002..007`).",
+        "enum": [
+          "filing",
+          "financial",
+          "news",
+          "jobs",
+          "web",
+          "official",
+          "document"
+        ],
+        "title": "SourceCategory",
+        "type": "string"
+      },
       "SourceOut": {
         "description": "Where a claim's evidence came from, and when it was read.\n\n`retrieved_at` is on the wire because `REQ-EVID-004` makes it part of what\nthe user is entitled to see, not internal bookkeeping.",
         "properties": {
           "authority_tier": {
             "$ref": "#/components/schemas/AuthorityTier"
+          },
+          "category": {
+            "$ref": "#/components/schemas/SourceCategory"
           },
           "id": {
             "format": "uuid",
@@ -749,6 +781,18 @@
             "title": "Retrieved At",
             "type": "string"
           },
+          "upload_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upload Id"
+          },
           "url": {
             "anyOf": [
               {
@@ -768,9 +812,138 @@
           "publisher",
           "authority_tier",
           "retrieved_at",
-          "published_at"
+          "published_at",
+          "category"
         ],
         "title": "SourceOut",
+        "type": "object"
+      },
+      "UploadOut": {
+        "description": "One attached file as the intake panel shows it (`REQ-DOC-003`).",
+        "properties": {
+          "chunk_count": {
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/UploadState"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "content_type",
+          "size_bytes",
+          "state",
+          "error",
+          "chunk_count",
+          "created_at"
+        ],
+        "title": "UploadOut",
+        "type": "object"
+      },
+      "UploadState": {
+        "description": "Document processing lifecycle (`REQ-DOC-003..004`).",
+        "enum": [
+          "pending",
+          "processing",
+          "ready",
+          "failed"
+        ],
+        "title": "UploadState",
+        "type": "string"
+      },
+      "UploadTicket": {
+        "description": "Where to PUT the bytes, and until when.\n\nThe URL is a short-lived write grant to one key (`DEC-12`). The API never\nsees the file: the browser uploads directly, which is implementation plan\n\u00a710 and the reason a 25 MB file does not have to fit through a request\nhandler.",
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "upload_id": {
+            "format": "uuid",
+            "title": "Upload Id",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload_id",
+          "url",
+          "expires_at",
+          "content_type"
+        ],
+        "title": "UploadTicket",
+        "type": "object"
+      },
+      "UploadTicketRequest": {
+        "description": "Ask for permission to upload one file.\n\nThe size is what the *client* says it is. It is checked here so an\noversized file is refused before it is transferred rather than after\n(`REQ-DOC-010 AC-2`), and checked again at completion against the object\nthat actually arrived, because a declared size is not a limit.",
+        "properties": {
+          "content_type": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "size_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "content_type",
+          "size_bytes"
+        ],
+        "title": "UploadTicketRequest",
         "type": "object"
       },
       "ValidationError": {
@@ -1369,6 +1542,331 @@
         "summary": "Ask",
         "tags": [
           "research"
+        ]
+      }
+    },
+    "/v1/research/{session_id}/start": {
+      "post": {
+        "description": "Enqueue the run for a session created with `defer_start`.\n\n**Idempotent.** A session that already has a run is returned unchanged\nrather than given a second one: this is the call a client retries after a\ndropped connection, and two runs against one version would produce two sets\nof claims in the same report.",
+        "operationId": "start_research_v1_research__session_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateResearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Research",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/v1/research/{session_id}/uploads": {
+      "get": {
+        "description": "Every file attached to this session, with its processing state.\n\nThis is what `REQ-DOC-003 AC-1` is rendered from. Polled by the intake\npanel while anything is still processing, which is why it is cheap: one\nindexed query and a count per row.",
+        "operationId": "list_uploads_v1_research__session_id__uploads_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UploadOut"
+                  },
+                  "title": "Response List Uploads V1 Research  Session Id  Uploads Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Uploads",
+        "tags": [
+          "uploads"
+        ]
+      },
+      "post": {
+        "description": "Reserve a slot and sign a URL for one file.\n\n**201, not 200**: this creates the `uploads` row. The row exists before the\nbytes do, which is what lets the count limit hold \u2014 a client that presigns\nten tickets and uploads none has used its ten.",
+        "operationId": "create_upload_ticket_v1_research__session_id__uploads_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadTicketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadTicket"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Upload Ticket",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/v1/research/{session_id}/uploads/{upload_id}": {
+      "delete": {
+        "description": "Remove a file and its extracted text (`REQ-SEC-008 AC-2`).\n\nThe chunks go with the row, immediately: they are the searchable copy, and\na deleted document that can still be retrieved as evidence is not deleted.\nThe object is removed next. If storage refuses, the row still goes \u2014 the\nuser's instruction is honoured and the orphaned object is a cleanup\nproblem, not a privacy one that waits on a retry.",
+        "operationId": "delete_upload_v1_research__session_id__uploads__upload_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Upload",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/v1/research/{session_id}/uploads/{upload_id}/complete": {
+      "post": {
+        "description": "Confirm the bytes arrived, and queue the file for reading.\n\nThe size is read back from storage and re-checked, which is the second half\nof `REQ-DOC-010 AC-1`. A file that is over the limit \u2014 or that never\narrived \u2014 leaves no usable row behind.",
+        "operationId": "complete_upload_v1_research__session_id__uploads__upload_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Upload",
+        "tags": [
+          "uploads"
         ]
       }
     },

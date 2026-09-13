@@ -65,6 +65,23 @@ class RunRepository:
         self._session.flush()
         return run
 
+    def has_run_for_version(self, version_id: UUID) -> bool:
+        """Whether a run has already been enqueued for this version.
+
+        What makes starting a deferred run idempotent. A client retrying after a
+        dropped connection must not get a second run against the same version:
+        both would write claims into one report, and the reader would see every
+        finding twice with no way to tell which pass produced it.
+        """
+        return (
+            self._session.execute(
+                select(ResearchRun.id)
+                .where(ResearchRun.version_id == version_id)
+                .limit(1)
+            ).first()
+            is not None
+        )
+
     def steps(self, run_id: UUID) -> Sequence[RunStep]:
         """A run's steps in execution order."""
         statement = (

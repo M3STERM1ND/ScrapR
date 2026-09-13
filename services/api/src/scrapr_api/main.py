@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from scrapr_api.errors import install_error_handlers
-from scrapr_api.routers import research
+from scrapr_api.routers import research, uploads
 from scrapr_core.config import get_settings
 
 __all__ = ["create_app"]
@@ -60,6 +60,7 @@ def create_app() -> FastAPI:
 
     install_error_handlers(app)
     app.include_router(research.router)
+    app.include_router(uploads.router)
 
     @app.get("/health", tags=["meta"])
     def health() -> dict[str, str]:

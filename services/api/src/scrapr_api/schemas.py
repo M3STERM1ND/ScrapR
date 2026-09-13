@@ -26,6 +26,8 @@ from scrapr_core.db.enums import (
     ConflictStatus,
     MessageRole,
     ResearchStatus,
+    SourceCategory,
+    UploadState,
     VersionStatus,
     VizKind,
 )
@@ -39,6 +41,10 @@ __all__ = [
     "ResearchSessionOut",
     "SectionOut",
     "SourceOut",
+    "UploadCompleteRequest",
+    "UploadOut",
+    "UploadTicket",
+    "UploadTicketRequest",
     "VersionOut",
     "VersionSummary",
 ]
@@ -56,6 +62,20 @@ class CreateResearchRequest(BaseModel):
     context_url: str | None = Field(default=None, max_length=2048)
     context_company: str | None = Field(default=None, max_length=200)
     context_ticker: str | None = Field(default=None, max_length=20)
+
+    defer_start: bool = False
+    """Create the session but do not enqueue the run yet.
+
+    For intake with attachments (`REQ-INPUT-004`). An upload needs a session to
+    belong to, so the session must exist first — and if the run started here,
+    retrieval could reach the documents category before the file finished
+    extracting, and `AC-2` ("available to the agent during the first run") would
+    hold only when the upload happened to win a race.
+
+    The client uploads, waits for each file to leave `processing`, and then
+    calls `POST /v1/research/{id}/start`. Defaults false, so research with no
+    documents is still one request.
+    """
 
 
 class CreateResearchResponse(BaseModel):
@@ -105,6 +125,15 @@ class SourceOut(BaseModel):
     retrieved_at: dt.datetime
     published_at: dt.datetime | None
 
+    category: SourceCategory
+    """What kind of source this is. On the wire because `REQ-DOC-008 AC-2`
+    requires a citation to a user's own document to be visibly distinct from a
+    citation to something ScrapR found, and the frontend cannot tell them apart
+    from a name and a null URL."""
+
+    upload_id: UUID | None = None
+    """Which uploaded file, when `category` is `document`. Null otherwise."""
+
 
 class EvidenceOut(BaseModel):
     """One piece of evidence behind a claim, as the inspector shows it.
@@ -147,6 +176,20 @@ class ConflictSideOut(BaseModel):
     label: str | None
     value: str
     """Exactly as reported (`REQ-EVID-008 AC-2`), never the normalised form."""
+
+    source_name: str
+    """Who said it. The publisher, or the filename for an uploaded document."""
+
+    from_your_document: bool
+    """Whether this side came from a file the reader uploaded.
+
+    `REQ-DOC-007 AC-2` requires the presentation to identify which side is the
+    user's own document, and a reader looking at "1.2bn against 1.9bn" needs to
+    know that one of those numbers is from their own spreadsheet before they can
+    judge the disagreement. Sent explicitly rather than left to the client to
+    derive by joining sources: a rule that has to be re-implemented in the
+    frontend is a rule that will be missed there.
+    """
 
 
 class ConflictOut(BaseModel):
@@ -289,3 +332,69 @@ class ActivityPage(BaseModel):
 
     events: list[ActivityEventOut]
     next_after: int
+
+
+# --------------------------------------------------------------------------
+# Uploads — `REQ-DOC-001..010`, `DEC-12`, `DEC-13`
+# --------------------------------------------------------------------------
+
+FILENAME_MAX = 255
+"""What most filesystems allow. Long enough for any real name, bounded because
+this string is stored, displayed, and used to derive a key suffix."""
+
+
+class UploadTicketRequest(BaseModel):
+    """Ask for permission to upload one file.
+
+    The size is what the *client* says it is. It is checked here so an
+    oversized file is refused before it is transferred rather than after
+    (`REQ-DOC-010 AC-2`), and checked again at completion against the object
+    that actually arrived, because a declared size is not a limit.
+    """
+
+    filename: str = Field(min_length=1, max_length=FILENAME_MAX)
+    content_type: str = Field(min_length=1, max_length=200)
+    size_bytes: int = Field(gt=0)
+
+
+class UploadTicket(BaseModel):
+    """Where to PUT the bytes, and until when.
+
+    The URL is a short-lived write grant to one key (`DEC-12`). The API never
+    sees the file: the browser uploads directly, which is implementation plan
+    §10 and the reason a 25 MB file does not have to fit through a request
+    handler.
+    """
+
+    upload_id: UUID
+    url: str
+    expires_at: dt.datetime
+    content_type: str
+    """Echoed back because it is **signed into the URL**. A PUT that sends a
+    different `Content-Type` header fails the signature check, so the client
+    has to send exactly this."""
+
+
+class UploadCompleteRequest(BaseModel):
+    """Tell the API the bytes are in place. No body beyond that is needed:
+    everything worth knowing is read back from storage rather than accepted
+    from the client."""
+
+
+class UploadOut(BaseModel):
+    """One attached file as the intake panel shows it (`REQ-DOC-003`)."""
+
+    id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    state: UploadState
+    error: str | None
+    """Why it failed, in words written for the user (`REQ-DOC-004 AC-3`). Null
+    unless `state` is `failed`."""
+
+    chunk_count: int
+    """How many passages were extracted. Zero until processing finishes, and
+    the honest answer to "did anything come out of this file"."""
+
+    created_at: dt.datetime

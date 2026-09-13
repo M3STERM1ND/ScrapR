@@ -2571,9 +2571,9 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 |---|---|---|---|
 | `OPEN-03` | Which queue/worker technology for background research and export jobs, **and where do those workers execute**? Vercel is the confirmed deployment platform (`DEC-03`) and its serverless execution limits may be exceeded by research runs and export generation. The answer must state how a run exceeding that limit satisfies `NFR-REL-001`. See §11.5. `websitedesign.md` says "Redis + workers"; that is shorthand, not a decision, and it says nothing about worker execution location. See implementation plan `N-05`. | Phase 1 | A |
 | ~~`OPEN-04`~~ | **Closed by `DEC-06`**, 2026-09-12. Anthropic, with `CHEAP`/`STANDARD`/`DEEP` mapped to Haiku 4.5 / Sonnet 5 / Opus 5 as configuration. See `docs/decisions/OPEN-04.md`. | — | — |
-| `OPEN-10` | Which object storage provider? `websitedesign.md` says "S3-compatible object storage", which names an API surface rather than a vendor and does **not** answer this. See implementation plan `N-05`. | Phase 1 | Both |
+| ~~`OPEN-10`~~ | **Closed by `DEC-12`**, 2026-09-12. The S3 API is the contract; Cloudflare R2 in production, MinIO in docker compose locally. Vercel Blob rejected despite `DEC-03`: no S3 surface, so no local equivalent. See `docs/decisions/OPEN-10.md`. | — | — |
 | `OPEN-11` | Which authentication mechanism or provider? | Phase 5 | B |
-| `OPEN-12` | Does V1 actually need vector search, or is it deferrable? If needed, confirm a PostgreSQL extension suffices (`REQ-TECH-007`). | Phase 1 (decide), Phase 4 (deliver) | A |
+| ~~`OPEN-12`~~ | **Closed by `DEC-15`**, 2026-09-12. PostgreSQL full-text search; no vector search in V1. `pgvector` remains a column and an index away, which is why deferring is cheap. | — | — |
 | ~~`OPEN-25`~~ | **Closed by `DEC-11`**, 2026-09-12. Hand-authored inline SVG from a renderer-agnostic spec, so one spec renders in the workspace and in a headless export without a browser in the pipeline. Also defines the product's semantic token layer (implementation plan §11.4). See `docs/decisions/OPEN-25.md`. | — | — |
 
 ### 13.2 Data source selection
@@ -2615,8 +2615,8 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
-| `OPEN-19` | What are the upload limits — maximum file size, maximum files per session, and maximum total size? Sets `REQ-DOC-010`. | Phase 4 | Both |
-| `OPEN-20` | Beyond PDF, DOCX, and spreadsheets, which "other common business/research document types" are supported in V1? | Phase 4 | A |
+| ~~`OPEN-19`~~ | **Closed by `DEC-13`**, 2026-09-12. 25 MB per file, 10 files per session, 100 MB total, enforced server-side at presign and again at complete. See `docs/decisions/OPEN-19-20-12.md`. | — | — |
+| ~~`OPEN-20`~~ | **Closed by `DEC-14`**, 2026-09-12. PDF, DOCX, XLSX, CSV, TXT, MD. Legacy binary formats, PPTX and OCR rejected for V1 with reasons. | — | — |
 
 ### 13.7 Export
 

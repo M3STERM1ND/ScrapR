@@ -22,6 +22,13 @@ would be the tool-layer equivalent of shipping the scripted provider.
 
 **Page fetch always registers.** It needs no key (`REQ-TOOL-003`), so the one
 category that is never missing is the one that reads a specific page.
+
+**Documents register whenever there is a database to read**, for the same
+reason: the store is our own Postgres, so there is no credential to be missing
+and no fixture that would mean anything. A session with no uploads simply has
+nothing to find, which is a legitimately empty result rather than an unserved
+category — and the orchestrator asks the category only for sessions that have
+ready documents, so an empty index is never queried at all.
 """
 
 from __future__ import annotations
@@ -29,9 +36,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import final
 
+from sqlalchemy.orm import Session, sessionmaker
+
 from scrapr_core.config import Settings
 from scrapr_core.tools.contract import ToolCategory
 from scrapr_core.tools.impl.adzuna import AdzunaTool
+from scrapr_core.tools.impl.documents import DocumentTool
 from scrapr_core.tools.impl.edgar import SecEdgarTool
 from scrapr_core.tools.impl.fixture import FixtureTool, fixture_item
 from scrapr_core.tools.impl.fmp import FinancialModelingPrepTool
@@ -77,7 +87,10 @@ class RegistryReport:
         return "; ".join(parts)
 
 
-def build_registry(settings: Settings) -> tuple[ToolRegistry, RegistryReport]:
+def build_registry(
+    settings: Settings,
+    session_factory: sessionmaker[Session] | None = None,
+) -> tuple[ToolRegistry, RegistryReport]:
     """Register every tool whose configuration is present, then freeze.
 
     Frozen before it is returned (`REQ-SEC-015 AC-1`): tool availability is
@@ -94,6 +107,12 @@ def build_registry(settings: Settings) -> tuple[ToolRegistry, RegistryReport]:
     # No key. `REQ-TOOL-003` was buildable while every other question was open,
     # and it stays available when every key is absent.
     add(PageFetchTool())
+
+    # `REQ-TOOL-008`. Optional only because tests build a registry without a
+    # database; the worker always passes one, and a worker that did not would
+    # read a user's uploads into a run that never mentions them.
+    if session_factory is not None:
+        add(DocumentTool(session_factory=session_factory))
 
     if settings.tavily_api_key.strip():
         # One vendor, two categories (`DEC-07 §3.1`). Separate registrations,
@@ -120,8 +139,9 @@ def build_registry(settings: Settings) -> tuple[ToolRegistry, RegistryReport]:
     unserved = tuple(
         category
         for category in ToolCategory
-        # Documents are Phase 4 and have no provider by design, so listing them
-        # as missing would report a gap that is not one.
+        # Documents are served by our own database or not at all. A fixture
+        # standing in for them would invent passages from files the user never
+        # uploaded, which is worse than the gap it papers over.
         if category is not ToolCategory.DOCUMENTS and category not in served
     )
 

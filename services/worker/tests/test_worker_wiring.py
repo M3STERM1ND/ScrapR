@@ -16,6 +16,9 @@ degrades reintroduces exactly the failure the guard exists to prevent.
 
 from __future__ import annotations
 
+import asyncio
+from uuid import uuid4
+
 import pytest
 
 import scrapr_worker.main as worker
@@ -23,6 +26,7 @@ from scrapr_core.config import Settings
 from scrapr_core.llm.anthropic_provider import AnthropicProvider
 from scrapr_core.llm.scripted import ScriptedProvider
 from scrapr_core.orchestrator.pipeline import STAGES
+from scrapr_core.storage.processing import ProcessedUpload
 from scrapr_core.tools import RegistryFrozenError, ToolCategory
 from scrapr_core.tools.builder import build_registry
 from scrapr_core.tools.impl import FixtureTool
@@ -244,3 +248,77 @@ def test_every_stage_has_a_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = build_runner("test-worker")
 
     assert set(runner._handlers) == set(STAGES)
+
+
+# --------------------------------------------------------------------------
+# The loop — `REQ-DOC-003`
+# --------------------------------------------------------------------------
+
+
+class _StubRunner:
+    """A runner that finds no steps, so the loop is measured on documents."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run_one(self) -> bool:
+        self.calls += 1
+        return False
+
+
+class _StubProcessor:
+    """One upload to extract, then nothing."""
+
+    def __init__(self, remaining: int = 1) -> None:
+        self.remaining = remaining
+        self.calls = 0
+
+    def run_one(self) -> ProcessedUpload | None:
+        self.calls += 1
+        if self.remaining <= 0:
+            return None
+        self.remaining -= 1
+        return ProcessedUpload(uuid4(), ready=True, chunks=3)
+
+
+async def test_the_loop_extracts_documents_as_well_as_running_steps() -> None:
+    """The wiring most likely to be dead.
+
+    Everything else in Phase 4 can be correct while `run_forever` never calls
+    the processor: uploads would sit in `processing` forever, `has_ready_
+    documents` would stay false, and every run would quietly research without
+    the reader's files. Nothing else in the suite would notice.
+    """
+    runner = _StubRunner()
+    processor = _StubProcessor(remaining=2)
+    stopping = asyncio.Event()
+
+    async def stop_soon() -> None:
+        await asyncio.sleep(0.05)
+        stopping.set()
+
+    await asyncio.gather(
+        worker.run_forever(runner, stopping, processor),  # type: ignore[arg-type]
+        stop_soon(),
+    )
+
+    assert processor.calls >= 2, "the loop never asked the processor for work"
+    assert runner.calls >= 1, "the loop stopped claiming research steps"
+
+
+async def test_the_loop_still_runs_without_a_processor() -> None:
+    """The processor is optional so tests and one-shot runners can omit it.
+
+    If that argument ever became required, an existing caller would break at
+    import rather than at the line that needed it.
+    """
+    runner = _StubRunner()
+    stopping = asyncio.Event()
+
+    async def stop_soon() -> None:
+        await asyncio.sleep(0.05)
+        stopping.set()
+
+    await asyncio.gather(worker.run_forever(runner, stopping), stop_soon())  # type: ignore[arg-type]
+
+    assert runner.calls >= 1

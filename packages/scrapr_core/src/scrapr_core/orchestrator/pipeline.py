@@ -33,6 +33,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from scrapr_core.config import get_settings
 from scrapr_core.db.enums import (
     ActivityStatus,
     ClaimType,
@@ -59,6 +60,7 @@ from scrapr_core.db.models import (
 from scrapr_core.db.repositories.activity import ActivityRepository
 from scrapr_core.db.repositories.evidence import EvidenceRepository
 from scrapr_core.db.repositories.questions import QuestionRepository
+from scrapr_core.db.repositories.uploads import UploadRepository
 from scrapr_core.domain.json import JsonMapping
 from scrapr_core.evidence.normalize import classify_metric
 from scrapr_core.evidence.tiering import registrable_host
@@ -301,6 +303,17 @@ class ResearchHandler:
         categories = _categories_for(area_questions)
         subject = research.subject or research.objective
 
+        # `REQ-DOC-005`. Documents are excluded from *planning*
+        # (`TARGETED_CATEGORIES`) because they cannot answer "tell me about
+        # Acme Corp" — the planner would pick them for an area and every
+        # question in it would come back `not_found`. They are still searched,
+        # by being appended to every area that has documents to search, which
+        # is the "caller that already has the target" path the tool contract
+        # describes. Without this the whole document pipeline is dead: files
+        # upload, extract, index, and are never once read.
+        if _has_documents(context, research.id):
+            categories = [*categories, ToolCategory.DOCUMENTS]
+
         activity.append(
             research.id,
             _area_label(area_name),
@@ -350,6 +363,7 @@ class ResearchHandler:
                     reservation,
                     cache,
                     all_sources,
+                    research.id,
                 )
                 skipped.update(result.skipped)
                 unread_sources = unread_sources or bool(result.failures)
@@ -395,6 +409,7 @@ class ResearchHandler:
         reservation: AreaReservation,
         cache: RetrievalCache,
         all_sources: set[UUID],
+        research_session_id: UUID,
     ) -> RoundResult:
         """One question, one round: retrieve, extract, record.
 
@@ -410,6 +425,7 @@ class ResearchHandler:
             self.registry,
             reservation,
             cache,
+            session_id=research_session_id,
         )
 
         items = [item for hit in result.results for item in hit.items]
@@ -636,6 +652,23 @@ def _subject_hosts(research: ResearchSession) -> frozenset[str]:
     """
     host = registrable_host(research.context_url)
     return frozenset({host}) if host else frozenset()
+
+
+def _has_documents(context: StepContext, research_session_id: UUID) -> bool:
+    """Whether this session has any document worth searching.
+
+    Asked once per area rather than per question, and false for the vast
+    majority of runs. The alternative — always appending the category — spends
+    a tool call per question querying an empty index and then reports
+    `not_found` as a gap in a report that has no gap.
+    """
+    settings = get_settings()
+    return UploadRepository(
+        context.session,
+        max_upload_bytes=settings.max_upload_bytes,
+        max_uploads_per_session=settings.max_uploads_per_session,
+        max_session_upload_bytes=settings.max_session_upload_bytes,
+    ).has_ready_documents(research_session_id)
 
 
 def _categories_for(questions: Sequence[ResearchQuestion]) -> list[ToolCategory]:

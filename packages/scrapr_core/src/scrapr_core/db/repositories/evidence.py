@@ -16,6 +16,12 @@ explanation -- reads what this writes, and `REQ-EVID-002 AC-3` requires the
 rule that fired be inspectable afterwards, so it is stored rather than
 recomputed.
 
+**A document source carries its `upload_id`** (`REQ-DOC-008 AC-2`). The
+documents tool puts it in the item's structured payload and this is where it
+becomes a column, so a stored citation can name which of the reader's files it
+came from. Categorising the source as a `DOCUMENT` and then losing the id would
+leave the report able to say "an uploaded file" and never which one.
+
 **A source is written before the evidence that depends on it** and in the same
 flush, so `REQ-EVID-001 AC-2` — no evidence without a source — holds even if the
 step dies between the two.
@@ -29,7 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from scrapr_core.db.base import utcnow
-from scrapr_core.db.enums import AuthorityTier
+from scrapr_core.db.enums import AuthorityTier, SourceCategory
 from scrapr_core.db.models import Evidence, Source
 from scrapr_core.domain.json import JsonValue
 from scrapr_core.evidence.dedupe import normalize_url
@@ -106,6 +112,7 @@ class EvidenceRepository:
             retrieved_at=item.retrieved_at,
             published_at=item.published_at,
             accessibility=item.accessibility,
+            upload_id=_upload_id(item),
         )
         self._session.add(source)
         self._session.flush()
@@ -186,6 +193,25 @@ def _structured(item: ToolItem, key: str) -> JsonValue:
     """One field of a provider's structured payload, or `None`."""
     structured = item.structured
     return structured.get(key) if structured else None
+
+
+def _upload_id(item: ToolItem) -> UUID | None:
+    """Which uploaded file this came from, for a document source.
+
+    Null for everything else, which is what `sources.upload_id` means. A value
+    that is present but unparseable is treated as absent rather than raised on:
+    a malformed id from a tool is a wiring bug, and failing the whole run over
+    it would lose the evidence as well as the attribution.
+    """
+    if item.source_category is not SourceCategory.DOCUMENT:
+        return None
+    raw = _structured(item, "upload_id")
+    if not isinstance(raw, str):
+        return None
+    try:
+        return UUID(raw)
+    except ValueError:
+        return None
 
 
 def _basis(item: ToolItem) -> str | None:

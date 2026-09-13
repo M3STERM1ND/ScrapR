@@ -15,6 +15,12 @@ environment question rather than a code one.
 are configuration. What is not configurable is the choice between a real model
 and the stand-in: a worker with no key refuses to start rather than quietly
 serving deterministic echo as research (§`build_runner`).
+
+**The same loop also extracts uploaded documents** (`REQ-DOC-003`). It is a
+second kind of work, not a second process: a user attaches a file before
+starting research, so extraction has to happen while no run exists to hang a
+step off. Doing it here keeps the reading of bytes in the one component that is
+allowed to hold them, and keeps a CPU-bound parse off the request path.
 """
 
 from __future__ import annotations
@@ -24,9 +30,11 @@ import logging
 import signal
 import sys
 from dataclasses import replace
+from functools import lru_cache
 from types import FrameType
 
 import anthropic
+from sqlalchemy.orm import Session, sessionmaker
 
 from scrapr_core.config import Settings, get_settings
 from scrapr_core.db.engine import build_engine, build_session_factory
@@ -35,9 +43,17 @@ from scrapr_core.llm.anthropic_provider import DEFAULT_PROFILES, AnthropicProvid
 from scrapr_core.llm.contract import LLMProvider, ModelTier
 from scrapr_core.llm.scripted import ScriptedProvider
 from scrapr_core.orchestrator.pipeline import build_handlers
+from scrapr_core.storage.objects import ObjectStore
+from scrapr_core.storage.processing import DocumentProcessor
 from scrapr_core.tools.builder import build_registry
 
-__all__ = ["build_provider", "build_registry", "build_runner", "main"]
+__all__ = [
+    "build_processor",
+    "build_provider",
+    "build_registry",
+    "build_runner",
+    "main",
+]
 
 logger = logging.getLogger("scrapr.worker")
 
@@ -102,32 +118,85 @@ def build_provider(settings: Settings) -> LLMProvider:
     return ScriptedProvider()
 
 
+@lru_cache(maxsize=1)
+def get_session_factory() -> sessionmaker[Session]:
+    """One engine for this process, shared by every kind of work it does.
+
+    Cached rather than built per caller: the research runner, the documents
+    tool and the extractor all open sessions, and three pools against one
+    database would triple the connection count for no benefit.
+    """
+    return build_session_factory(build_engine())
+
+
+def build_processor(
+    settings: Settings, session_factory: sessionmaker[Session]
+) -> DocumentProcessor:
+    """The document extractor, sharing the worker's session factory."""
+    return DocumentProcessor(session_factory, ObjectStore(settings), settings)
+
+
 def build_runner(worker_id: str) -> JobRunner:
     """Wire the runner to the pipeline's stage handlers."""
     settings = get_settings()
     provider = build_provider(settings)
-    registry, report = build_registry(settings)
+
+    # One factory for both: the runner opens a session per step, and the
+    # documents tool opens its own to read the uploads that step is asking
+    # about (`REQ-TOOL-008`).
+    session_factory = get_session_factory()
+    registry, report = build_registry(settings, session_factory)
 
     # Said once, at start, rather than discovered per run. An operator needs to
     # know a category is unserved before the reports start naming it as a gap.
     logger.info("provider: %s; %s", provider.name, report.summary)
 
     return JobRunner(
-        build_session_factory(build_engine()),
+        session_factory,
         build_handlers(provider, registry),
         worker_id=worker_id,
     )
 
 
-async def run_forever(runner: JobRunner, stopping: asyncio.Event) -> None:
+async def run_forever(
+    runner: JobRunner,
+    stopping: asyncio.Event,
+    processor: DocumentProcessor | None = None,
+) -> None:
     """Poll for work until asked to stop.
 
     A step in flight is always finished before the loop exits. Killing one
     mid-execution would be safe — its lease expires and another worker retries
     it — but "safe to interrupt" is not a reason to interrupt.
+
+    **Documents are extracted before research steps are claimed.** A user who
+    attaches a file and immediately starts research must not have the run reach
+    retrieval while their document is still `processing`, because the documents
+    category is skipped for a session with nothing `ready` — the file would be
+    silently absent from a report it should have informed.
     """
     while not stopping.is_set():
-        if not await runner.run_one():
+        did_work = False
+
+        if processor is not None:
+            # Off the event loop: extraction parses a PDF, which is CPU-bound
+            # and would otherwise stall every concurrent tool call in a
+            # research step running beside it.
+            processed = await asyncio.to_thread(processor.run_one)
+            if processed is not None:
+                did_work = True
+                logger.info(
+                    "extracted upload %s: %s",
+                    processed.upload_id,
+                    f"{processed.chunks} chunks"
+                    if processed.ready
+                    else f"failed ({processed.reason})",
+                )
+
+        if await runner.run_one():
+            did_work = True
+
+        if not did_work:
             try:
                 async with asyncio.timeout(IDLE_SLEEP_SECONDS):
                     await stopping.wait()
@@ -145,6 +214,7 @@ def main() -> int:
 
     worker_id = f"worker-{settings.scrapr_env}"
     runner = build_runner(worker_id)
+    processor = build_processor(settings, get_session_factory())
     stopping = asyncio.Event()
 
     def _stop(signum: int, frame: FrameType | None) -> None:
@@ -154,8 +224,8 @@ def main() -> int:
     for received in (signal.SIGINT, signal.SIGTERM):
         signal.signal(received, _stop)
 
-    logger.info("worker %s polling for runnable steps", worker_id)
-    asyncio.run(run_forever(runner, stopping))
+    logger.info("worker %s polling for steps and uploads", worker_id)
+    asyncio.run(run_forever(runner, stopping, processor))
     logger.info("worker %s stopped", worker_id)
     return 0
 

@@ -15,6 +15,13 @@ they share questions about one subject — and the second ask should cost nothin
 The cached result keeps its **original** `retrieved_at` (`AC-2`), because the
 time a page was read is a fact about the page, not about the cache.
 
+**A targeted category is given its target.** `ToolCategory.DOCUMENTS` searches
+one research session's uploads, and the registry is frozen per process rather
+than built per run — so the session id travels in the request instead of being
+baked into the tool. It is added only for that category: putting it in every
+request would change the cache key of every web search for no reason, and hand
+a session id to providers that have no business holding one.
+
 **Nothing is stored here.** This stage returns what tools said; stage 4 decides
 what becomes a source and a piece of evidence. Keeping the split means a
 provenance-less result is rejected at extraction (`REQ-TOOL-012 AC-2`) rather
@@ -26,7 +33,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import final
+from uuid import UUID
 
+from scrapr_core.domain.json import JsonValue
 from scrapr_core.orchestrator.budget import AreaReservation
 from scrapr_core.tools.contract import (
     ToolBudget,
@@ -108,6 +117,7 @@ async def retrieve_area(
     reservation: AreaReservation,
     cache: RetrievalCache,
     budget: ToolBudget | None = None,
+    session_id: UUID | None = None,
 ) -> RoundResult:
     """Run one retrieval round across an area's categories.
 
@@ -120,9 +130,13 @@ async def retrieve_area(
     skipped: list[ToolCategory] = []
 
     for category in categories:
+        params: dict[str, JsonValue] = {"query": query}
+        if category is ToolCategory.DOCUMENTS and session_id is not None:
+            params["session_id"] = str(session_id)
+
         request = ToolRequest(
             category=category,
-            params={"query": query},
+            params=params,
             budget=budget or ToolBudget(),
         )
 

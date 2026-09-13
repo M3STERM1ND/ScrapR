@@ -37,6 +37,7 @@ from scrapr_core.db.enums import (
     ConflictCause,
     ConflictStatus,
     NormalizationStatus,
+    SourceCategory,
 )
 from scrapr_core.db.models import (
     Claim,
@@ -288,6 +289,14 @@ def _assign_confidence(
         distinct.add(item.fingerprint)
         distinct.add(key)
 
+        # `REQ-DOC-008 AC-3`. A document the reader supplied is support, not
+        # corroboration: it is counted separately below and contributes to
+        # neither the distinct-source count nor the tier that count is weighed
+        # against. Skipped here rather than subtracted later, so a document can
+        # never raise `best_tier` either.
+        if item.source.category is SourceCategory.DOCUMENT:
+            continue
+
         tier = item.source.authority_tier
         if best is None or _TIER_RANK[tier] > _TIER_RANK[best]:
             best = tier
@@ -302,12 +311,29 @@ def _assign_confidence(
             # evidence, and `AC-3` calls it non-comparable rather than bad.
             pass
 
-    source_count = len({item.source.id for item in cited})
+    source_count = len(
+        {
+            item.source.id
+            for item in cited
+            if item.source.category is not SourceCategory.DOCUMENT
+        }
+    )
+    document_count = len(
+        {
+            item.source.upload_id or item.source.id
+            for item in cited
+            if item.source.category is SourceCategory.DOCUMENT
+        }
+    )
 
     verdict = assess(
         ConfidenceInputs(
             claim_type=claim.claim_type,
             distinct_sources=source_count,
+            # Counted by *file*, not by passage: three chunks of one PDF are
+            # one document, and saying "your 3 uploaded documents" when the
+            # reader attached one would be a lie about their own evidence.
+            document_sources=document_count,
             best_tier=best,
             above_lower_sources=above_lower,
             has_unresolved_conflict=any(
@@ -326,6 +352,7 @@ def _assign_confidence(
     claim.confidence_inputs = {
         **verdict.as_json,
         "distinct_sources": source_count,
+        "document_sources": document_count,
         "above_lower_sources": above_lower,
         "best_tier": best.value if best else None,
         "conflicts": len(conflicts),

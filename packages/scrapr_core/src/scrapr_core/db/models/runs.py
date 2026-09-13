@@ -84,6 +84,14 @@ class ResearchRun(Base):
     """Millionths of a currency unit. Integer, because floating-point money is a
     reconciliation bug waiting to happen."""
 
+    failure_stage: Mapped[str | None]
+    """The step that ended a failed run (`REQ-OBS-001 AC-1`)."""
+
+    failure_kind: Mapped[str | None]
+    """Why, as a stable category rather than a message, so failures group by
+    cause (`REQ-OBS-001 AC-2`): `exception:<Type>`, `permanent`, `no_handler`,
+    `deleted_by_owner`, `expired`."""
+
     started_at: Mapped[dt.datetime | None]
     finished_at: Mapped[dt.datetime | None]
 
@@ -133,7 +141,11 @@ class ToolInvocation(Base):
     """Internal record of one tool call. Never rendered (`REQ-OBS-007`)."""
 
     __tablename__ = "tool_invocations"
-    __table_args__ = (Index("ix_tool_invocations_run_id", "run_id"),)
+    __table_args__ = (
+        Index("ix_tool_invocations_run_id", "run_id"),
+        # The operator report: failures per tool and per domain over time.
+        Index("ix_tool_invocations_created_at", "created_at"),
+    )
 
     id: Mapped[UuidPk]
 
@@ -152,8 +164,16 @@ class ToolInvocation(Base):
     request_digest: Mapped[Json | None]
     """A digest of the request, not the request. Storing raw provider payloads
     would put retrieved content — and possibly credentials — in a table whose
-    whole purpose is to be read casually during debugging."""
+    whole purpose is to be read casually during debugging.
+
+    Holds the parameters the application built for the call — the query, a
+    URL — and the stage that made it (`REQ-OBS-007 AC-1`). Never credentials,
+    which live in provider clients rather than in request parameters."""
 
     cost_micros: Mapped[int | None] = mapped_column(BigInteger)
+
+    source_domain: Mapped[str | None]
+    """The host a call concerned, when it named one, so paywalled, blocked and
+    unreachable outcomes can be counted per domain (`REQ-OBS-006`)."""
 
     created_at: Mapped[CreatedAt]

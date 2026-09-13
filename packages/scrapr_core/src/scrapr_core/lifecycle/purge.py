@@ -171,7 +171,7 @@ def _expire_anonymous_research(session: Session, moment: dt.datetime) -> int:
         .values(deleted_at=moment)
         .execution_options(synchronize_session=False)
     )
-    cancel_runs(session, ids, now=moment)
+    cancel_runs(session, ids, now=moment, kind="expired")
     return len(ids)
 
 

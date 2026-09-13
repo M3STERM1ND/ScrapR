@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 
 from scrapr_core.config import get_settings
 
@@ -36,14 +37,44 @@ HSTS = "max-age=63072000; includeSubDomains"
 preload list is a decision about the whole domain, not about this service."""
 
 
+MAX_BODY_BYTES = 1024 * 1024
+"""No route in this API needs a larger body: uploads go straight to storage
+(`DEC-12`), and the largest field is a 2,000-character objective (`DEC-23`)."""
+
+UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _refusal(status_code: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": {"code": code, "message": message}},
+        headers=SECURITY_HEADERS,
+    )
+
+
 def install_security_headers(app: FastAPI) -> None:
-    """Attach the headers to every response, errors included."""
-    send_hsts = get_settings().scrapr_env != "local"
+    """Attach the headers to every response, errors included, and refuse
+    oversized bodies and cross-origin writes before any route runs."""
+    settings = get_settings()
+    send_hsts = settings.scrapr_env != "local"
+    allowed_origins = frozenset(settings.allowed_origins)
 
     @app.middleware("http")
     async def _security_headers(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        declared = request.headers.get("content-length")
+        if declared is not None and (not declared.isdigit() or int(declared) > MAX_BODY_BYTES):
+            return _refusal(413, "request_too_large", "That request is too large.")
+
+        # `DEC-23`: a state-changing request from a page on another origin is
+        # refused, on top of `SameSite=Lax`. Requests with no `Origin` header
+        # are not browser cross-site writes and pass: browsers always send one
+        # on a cross-origin POST.
+        origin = request.headers.get("origin")
+        if request.method in UNSAFE_METHODS and origin is not None and origin not in allowed_origins:
+            return _refusal(403, "forbidden_origin", "That request was not allowed.")
+
         response = await call_next(request)
         for name, value in SECURITY_HEADERS.items():
             # The interactive docs need their own scripts; everything else

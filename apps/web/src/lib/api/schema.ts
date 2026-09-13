@@ -184,6 +184,9 @@ export interface paths {
          *     The response is committed rows and nothing else: the run is picked up by
          *     whatever is polling `run_steps`, which is what keeps `OPEN-03` a hosting
          *     question (implementation plan §5.6).
+         *
+         *     Counted against the research limits and refused when the queue is full
+         *     (`REQ-SEC-010 AC-1`, `DEC-23`), before anything is written.
          */
         post: operations["create_research_v1_research_post"];
         delete?: never;

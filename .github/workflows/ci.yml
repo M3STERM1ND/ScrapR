@@ -77,6 +77,16 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --group dev
+      # Object storage, as docker compose provides it locally (`DEC-12`). A
+      # service container cannot pass MinIO its `server` argument, so it is
+      # started here. Without it the upload, storage and export suites skip.
+      - name: Start object storage
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=scrapr -e MINIO_ROOT_PASSWORD=scrapr_local_dev_only \
+            quay.io/minio/minio server /data
+          for _ in $(seq 1 30); do curl -fsS http://localhost:9000/minio/health/live && break; sleep 1; done
+          uv run python -c "import boto3; boto3.client('s3', endpoint_url='http://localhost:9000', aws_access_key_id='scrapr', aws_secret_access_key='scrapr_local_dev_only', region_name='auto').create_bucket(Bucket='scrapr-uploads')"
       - name: Apply migrations
         run: uv run alembic upgrade head
       - name: Run tests
@@ -142,6 +152,14 @@ jobs:
 
       - run: uv sync --group dev
       - run: uv run alembic upgrade head
+      # Exports and uploads go to object storage, so the browser suite needs it.
+      - name: Start object storage
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=scrapr -e MINIO_ROOT_PASSWORD=scrapr_local_dev_only \
+            quay.io/minio/minio server /data
+          for _ in $(seq 1 30); do curl -fsS http://localhost:9000/minio/health/live && break; sleep 1; done
+          uv run python -c "import boto3; boto3.client('s3', endpoint_url='http://localhost:9000', aws_access_key_id='scrapr', aws_secret_access_key='scrapr_local_dev_only', region_name='auto').create_bucket(Bucket='scrapr-uploads')"
 
       # The API and the worker, so the suite exercises the real flow rather
       # than a mocked one. The worker is what turns run_steps into a report.

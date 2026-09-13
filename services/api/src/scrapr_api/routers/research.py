@@ -14,15 +14,17 @@ Two rules run through every handler:
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Sequence
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Request, status
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from scrapr_api.deps import CurrentOwner, DbSession, OwnerOrNew, Research
+from scrapr_api.deps import CurrentOwner, DbSession, OptionalAccount, OwnerOrNew, Research
 from scrapr_api.errors import ApiError
+from scrapr_api.limits import admit_research, enforce_action, record_account_usage
 from scrapr_api.routers.uploads import get_object_store
 from scrapr_api.schemas import (
     ActivityEventOut,
@@ -82,6 +84,7 @@ from scrapr_core.orchestrator.converse import (
     classify_intent,
 )
 from scrapr_core.orchestrator.pipeline import CONVERSATION_STAGES, STAGES, UPDATE_STAGES
+from scrapr_core.security.limits import QUESTION, RESEARCH
 from scrapr_worker.main import build_provider
 
 logger = logging.getLogger(__name__)
@@ -106,7 +109,9 @@ def _not_found() -> ApiError:
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 def create_research(
     body: CreateResearchRequest,
+    request: Request,
     owner: OwnerOrNew,
+    account: OptionalAccount,
     session: DbSession,
 ) -> CreateResearchResponse:
     """Start research. **202**, because the answer does not exist yet.
@@ -114,7 +119,14 @@ def create_research(
     The response is committed rows and nothing else: the run is picked up by
     whatever is polling `run_steps`, which is what keeps `OPEN-03` a hosting
     question (implementation plan §5.6).
+
+    Counted against the research limits and refused when the queue is full
+    (`REQ-SEC-010 AC-1`, `DEC-23`), before anything is written.
     """
+    enforce_action(session, request, owner, RESEARCH)
+    admit_research(session)
+    record_account_usage(account, "research_started")
+
     research = ResearchRepository(session, owner)
     created = research.create_session(
         objective=body.objective,
@@ -164,6 +176,8 @@ def start_research(
 
     runs = RunRepository(session)
     if not runs.has_run_for_version(version.id):
+        # Counted when the session was created; only the queue is checked here.
+        admit_research(session)
         runs.create_run(session_id, version.id, STAGES)
 
     return CreateResearchResponse(
@@ -211,7 +225,10 @@ def get_research(
 @router.post("/{session_id}/update", status_code=status.HTTP_202_ACCEPTED)
 def update_research(
     session_id: UUID,
+    request: Request,
     research: Research,
+    owner: CurrentOwner,
+    account: OptionalAccount,
     session: DbSession,
 ) -> CreateResearchResponse:
     """Update Research: fresh retrieval into a new version (`REQ-VER-001`, `REQ-VER-005`).
@@ -248,6 +265,11 @@ def update_research(
             "nothing_to_update",
             "There is no finished report to update yet. Start the research again instead.",
         )
+
+    # An update is research: counted and admitted like any other (`DEC-23`).
+    enforce_action(session, request, owner, RESEARCH)
+    admit_research(session)
+    record_account_usage(account, "updates_started")
 
     version = research.open_version(session_id, compare_with=baseline)
     if version is None:  # pragma: no cover - ownership was checked above
@@ -618,7 +640,10 @@ def get_messages(
 async def ask(
     session_id: UUID,
     body: AskIn,
+    request: Request,
     research: Research,
+    owner: CurrentOwner,
+    account: OptionalAccount,
     session: DbSession,
 ) -> AskOut:
     """Ask a follow-up, and answer it from the research (`REQ-CONV-001`).
@@ -640,13 +665,27 @@ async def ask(
     if found is None:
         raise _not_found()
 
-    version_id = found.current_version_id
-    if version_id is None:
-        raise _not_found()
+    # Answered from the last version that finished. During an update the
+    # session's current pointer is the version still being built, and an
+    # answer grounded in half-gathered evidence would cite what is not there
+    # yet (`REQ-CONV-004`).
+    answering = research.latest_completed_version(session_id)
+    if answering is None:
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "research_not_ready",
+            "The research has not produced a report to ask about yet.",
+        )
+    version_id = answering.id
+
+    enforce_action(session, request, owner, QUESTION)
+    record_account_usage(account, "questions_asked")
 
     conversation = ConversationRepository(session)
     context = _conversation_context(session, found, version_id, conversation)
     provider = build_provider(get_settings())
+    # `TBD-07`, `REQ-OBS-003`: how long an answer took, logged for operators.
+    started = time.perf_counter()
 
     # Classified before anything is written, because the answer for a research
     # question is produced by a different mechanism than the answer for a
@@ -655,6 +694,17 @@ async def ask(
     researched = verdict.intent is Intent.RESEARCH
 
     if researched:
+        # Research started from a question is research: counted, and refused
+        # while another run is in flight or the queue is full (`DEC-23`).
+        if RunRepository(session).has_active_run(session_id):
+            raise ApiError(
+                status.HTTP_409_CONFLICT,
+                "research_in_progress",
+                "Research on this question is already running. Ask again once it finishes.",
+            )
+        enforce_action(session, request, owner, RESEARCH)
+        admit_research(session)
+
         # `REQ-CONV-003`: fresh retrieval, run by the pipeline. A new version,
         # because `REQ-VER-002` makes the current one immutable and adding
         # evidence to a closed version would break the promise that an answer
@@ -721,6 +771,11 @@ async def ask(
         context_ref={"claim_type": grounded.claim_type.value},
     )
     session.commit()
+    logger.info(
+        "follow-up answered in %d ms (researched=%s)",
+        int((time.perf_counter() - started) * 1000),
+        researched,
+    )
 
     return AskOut(
         question=_message_out(question, []),

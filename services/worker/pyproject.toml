@@ -9,6 +9,7 @@ dependencies = [
 
 [project.scripts]
 scrapr-worker = "scrapr_worker.main:main"
+scrapr-ops = "scrapr_worker.ops:main"
 
 [tool.uv.sources]
 scrapr-core = { workspace = true }

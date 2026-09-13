@@ -109,7 +109,11 @@ def delete_research(
 
 
 def cancel_runs(
-    session: Session, session_ids: Sequence[UUID], *, now: dt.datetime | None = None
+    session: Session,
+    session_ids: Sequence[UUID],
+    *,
+    now: dt.datetime | None = None,
+    kind: str = "deleted_by_owner",
 ) -> int:
     """Stop every unfinished run of these sessions. Returns runs stopped.
 
@@ -155,6 +159,9 @@ def cancel_runs(
         run.status = RunStatus.FAILED
         run.termination_reason = TerminationReason.FAILURE
         run.finished_at = moment
+        # Not a defect, and the failure report must be able to say so
+        # (`REQ-OBS-001 AC-2`).
+        run.failure_kind = kind
     return len(unfinished)
 
 

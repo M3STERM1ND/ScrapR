@@ -2,9 +2,10 @@
 
 Turns a question into an evidence-backed report with sources, analysis, charts and follow-up.
 
-**Status: Phase 7 complete.** Research without an account, save it to one, come
-back to it, update it without losing what it said before, and take it away as a
-PDF or a PowerPoint deck in one of six themes.
+**Status: Phase 8 complete — V1 feature-complete.** Research without an account,
+save it to one, come back to it, update it without losing what it said before,
+and take it away as a PDF or a PowerPoint deck in one of six themes; with rate
+limits, cost ceilings, metered usage and an operator report behind it.
 
 Ask a question at `/research/new`, watch the activity timeline fill in as the
 worker executes the steps, and read the report that comes back with citations,
@@ -43,6 +44,7 @@ packages/scrapr_core/ all Python domain logic
   lifecycle/          deletion, expiry and the purge sweep
   versioning/         update prioritisation and What's Changed
   export/             document, six themes, PDF and PPTX renderers, export job
+  observability/      metering, tool call records, the operator report
 packages/contracts/   openapi.json, generated from the API
 docs/                 specs and decision records
 design-system/        MASTER.md, the landing visual system
@@ -209,6 +211,44 @@ CRLF-converted duplicate of the entire landing page because this was missing.
 
 ---
 
+## Deploying and operating
+
+The topology is `DEC-03` and `DEC-26`; the limits are `DEC-23` to `DEC-25`.
+
+| Piece | Runs on | Needs |
+|---|---|---|
+| `apps/web` | Vercel | `NEXT_PUBLIC_API_BASE_URL` |
+| `services/api` | Vercel (Python) | `DATABASE_URL` (api role, `sslmode=require`), storage keys, `ANTHROPIC_API_KEY`, `WEB_ORIGINS`, `TRUST_PROXY_HEADERS=true`, `SCRAPR_ENV=production` |
+| `services/worker` | Any container host, one long-lived process per replica | `DATABASE_URL` (worker role), storage keys, `ANTHROPIC_API_KEY`, the data-provider keys, `SCRAPR_ENV=production` |
+| PostgreSQL 17 | A managed provider (`N-01`) | Encryption at rest, backups retained 7 days or fewer (`DEC-18`) |
+| Object storage | Cloudflare R2 (`DEC-12`) | A private bucket |
+
+**Choices still to make, none of which change code:** the Postgres provider and
+the worker container host. Both are billing and account decisions.
+
+**Before first deploy:**
+
+1. Create the database roles in `infra/postgres-roles.sql` and run
+   `uv run alembic upgrade head` as `scrapr_owner`.
+2. Give each process only its own credentials. The API refuses to start in
+   production holding a data-provider key (`REQ-SEC-006`), and both processes
+   refuse to start without TLS to the database, storage and browser origin
+   (`REQ-SEC-003`).
+3. Scale workers to the concurrency you want; one replica runs one step at a
+   time, and `TBD-12` is 20 at peak.
+
+**Operating it:** `uv run scrapr-ops report --days 7` prints run outcomes and
+timings, cost against the ceilings (and every run over 80% of one), failures by
+stage and cause, each tool's failure rate and latency, source failures by
+domain, and export render times. It reads the database directly; no API route
+serves any of it (`REQ-OBS-007`).
+
+**Known gaps to close with a provider:** password reset and email verification
+need an outbound email provider (`DEC-16`); workspace render time (`TBD-06`)
+needs real-user monitoring to be measured in production.
+
+---
+
 ## Documents
 
 | File | What it is |
@@ -218,4 +258,5 @@ CRLF-converted duplicate of the entire landing page because this was missing.
 | `docs/superpowers/specs/implementation-plan.md` | architecture and build plan |
 | `docs/decisions/` | one file per resolved open question |
 | `design-system/MASTER.md` | landing visual system |
+| `infra/postgres-roles.sql` | least-privilege database roles for production |
 | `websitedesign.md` | the original landing build brief, not an architecture record |

@@ -785,10 +785,10 @@ The six **export** themes (`REQ-EXP-003`) are a third system, separate from both
 |---|---|---|
 | Next.js app | Vercel | **Decided** (`DEC-03`) |
 | Application API (FastAPI) | Vercel | Decided in principle, **runtime shape unclear** — see `N-02` |
-| Workers | Not decided | `OPEN-03` |
+| Workers | Long-running container, off Vercel; host vendor a deployment choice | **Decided** (`DEC-26`) |
 | PostgreSQL | Not decided | **Unregistered gap** — see `N-01` |
 | Object storage | Cloudflare R2 | **Decided** (`DEC-12`); S3 API is the contract, MinIO locally |
-| Queue / dispatch | Not decided | `OPEN-03` |
+| Queue / dispatch | Postgres, `FOR UPDATE SKIP LOCKED` | **Decided** (`DEC-26`) |
 | Secrets | Environment config, validated at startup | `REQ-SEC-007 AC-3` |
 
 Standing constraints: TLS only (`REQ-SEC-003`), encryption at rest for database, uploads and artifacts (`REQ-SEC-004`), artifacts never publicly enumerable and served only via short-lived signed URLs to the owner (`REQ-EXP-008`).
@@ -907,7 +907,7 @@ B: six theme definitions, PDF and PPTX renderers, export UI.
 A: export job pipeline, version binding, artifact storage and signed retrieval.
 
 ### Phase 8 — Hardening
-**Blocked by:** `OPEN-18`, `OPEN-23`, `OPEN-29`.
+**Blocked by:** nothing. `OPEN-18` closed by `DEC-23`, `OPEN-23` by `DEC-24`, `OPEN-29` by `DEC-25`, and `OPEN-03` by `DEC-26` (`docs/decisions/OPEN-18-23-29-03.md`). Every `TBD` is set; `scrapr-ops report` measures each against production runs.
 
 Both: rate limiting, abuse controls, least privilege, injection hardening pass, full observability, and **setting every `TBD` value** — the PRD calls shipping with unset `TBD`s a release blocker.
 
@@ -927,7 +927,7 @@ Both: rate limiting, abuse controls, least privilege, injection hardening pass, 
 
 **`OPEN-03` is no longer a Phase 1 blocker.** The PRD lists it as one. §5.6 removes it: Postgres holds job state, so a single-process local runner satisfies every requirement through Phase 1, and the queue becomes a concurrency concern in Phase 8. What remains open is where workers execute in production and what dispatches them, which is `N-04`.
 
-The remaining registered questions (`OPEN-04..12`, `18..24`, `26`, `27`, `29`) are unchanged and are absorbed by abstractions or fall in later phases.
+The remaining registered questions (`OPEN-04..12`, `18..24`, `26`, `27`, `29`) were absorbed by abstractions or fell in later phases. As of 2026-09-13 every one is closed by a decision record (`DEC-06` through `DEC-26`); `PRD.md §13` is the register. What stays open are the deployment gaps in §14.2 (`N-01`, `N-02`), which are provider choices with no code consequence.
 
 ### 14.2 New gaps this plan surfaced — not resolved here
 
@@ -936,7 +936,7 @@ The remaining registered questions (`OPEN-04..12`, `18..24`, `26`, `27`, `29`) a
 | `N-01` | **PostgreSQL hosting is not registered anywhere.** `REQ-TECH-003` names the engine only, and the open-questions register has no entry for it. | Blocks Phase 1 deployment. Also determines connection pooling strategy, which matters a lot if the API is serverless. | Both |
 | `N-02` | **"Application API" in `REQ-TECH-010` is ambiguous.** Does FastAPI run on Vercel's Python runtime, or do Next.js route handlers front a FastAPI service hosted elsewhere? | Changes repo layout, latency budget, pooling, and whether SSE is viable. | Both |
 | `N-03` | **Activity transport is unspecified.** `REQ-ACT-001 AC-3` requires events during research but names no mechanism, and serverless constrains long-lived connections. | Determines whether SSE, WebSocket, or polling. Interacts with `N-02`. | B |
-| `N-04` | `OPEN-03` narrowed but not closed by §5.6. Recording this so the narrowing is not mistaken for a resolution. | — | A |
+| ~~`N-04`~~ | **Resolved by `DEC-26`, 2026-09-13.** `OPEN-03` narrowed but not closed by §5.6. Recording this so the narrowing is not mistaken for a resolution. | — | A |
 | ~~`N-05`~~ | ~~**The landing brief names Redis workers and S3-compatible storage.**~~ **Resolved 2026-09-09: they are shorthand, not decisions.** The brief is `websitedesign.md`, a landing-page build spec. Its `STACK` block also reads "AI: LLM APIs" and "Research: Web search + specialized data APIs + News APIs", which are indisputably category placeholders, and the two contested lines sit at the same altitude in the same list. The lines that *did* become decisions carry independent provenance (masterplan §19 plus `DEC-01`, `DEC-02`, `DEC-03`); Redis and S3 have none, and masterplan §19 says only "object storage" and "a queue/worker architecture". | Neither `OPEN` closes under either reading. "S3-compatible" names an API surface, not a vendor, so it cannot answer `OPEN-10`. "Redis" answers at most half of `OPEN-03` and says nothing about where workers execute, which §5.6 defers to Phase 8 regardless. `websitedesign.md` now carries a dated note so the shorthand stops propagating. | Both |
 | `N-06` | **Correction, 2026-09-09: `websitedesign.md` is not empty.** This row previously read "empty (0 bytes)"; the file holds ~4.3 KB and was read in full while resolving `N-05`. The real gap is narrower: it is a **landing-page build brief**, not a design specification, and `design-system/MASTER.md` is the visual system derived from it. Nothing references the brief as a spec except this plan. | Downgraded from a content gap to a naming one. Either retitle it to what it is (a build brief) or fold its still-live constraints into `MASTER.md` and retire it. No longer blocks anything. | B |
 | ~~`N-07`~~ | **Resolved by `DEC-19`, 2026-09-13: no evidence is reused across versions; the cache is run-scoped.** **Evidence reuse across versions is unspecified.** §4.1 version-scopes everything for immutability, which means Update Research re-fetches rather than reusing. `REQ-TOOL-013` wants reuse for cost; `REQ-VER-003` wants freshness. The boundary between them is `OPEN-26`'s territory but is not stated as such. | Directly sets Update Research cost (`TBD-11`). | A |

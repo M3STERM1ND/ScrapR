@@ -122,6 +122,30 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
+    # Operating limits — `DEC-23`, `DEC-24`, `DEC-25` (Phase 8)
+    # ------------------------------------------------------------------
+
+    run_cost_ceiling_micros: int = Field(
+        default=2_000_000, alias="RUN_COST_CEILING_MICROS", gt=0,
+        description="TBD-10: the most one research run may spend, in millionths of a dollar.",
+    )
+    update_cost_ceiling_micros: int = Field(
+        default=1_500_000, alias="UPDATE_COST_CEILING_MICROS", gt=0,
+        description="TBD-11: the most one Update Research run may spend.",
+    )
+    queue_shed_threshold: int = Field(
+        default=100, alias="QUEUE_SHED_THRESHOLD", gt=0,
+        description="TBD-13: pending runs beyond which new research is refused with 503.",
+    )
+    activity_heartbeat_seconds: float = Field(
+        default=20.0, alias="ACTIVITY_HEARTBEAT_SECONDS", gt=0,
+        description=(
+            "How long research may go without a timeline event before the step "
+            "repeats its progress line. Below TBD-05's 30 seconds on purpose."
+        ),
+    )
+
+    # ------------------------------------------------------------------
     # Object storage — `DEC-12`, closing `OPEN-10`
     # ------------------------------------------------------------------
 
@@ -183,6 +207,28 @@ class Settings(BaseSettings):
         if "local_dev_only" in self.storage_secret_key or "local_dev_only" in self.database_url:
             problems.append("the docker-compose development credentials must not reach production")
         return problems
+
+    def api_privilege_problems(self) -> list[str]:
+        """Credentials the API process holds but never uses (`REQ-SEC-006`).
+
+        Only research retrieves, so only the worker needs data-provider keys.
+        In production an API holding one refuses to start: a credential a
+        process does not use is only a credential it can leak.
+        """
+        if self.scrapr_env != "production":
+            return []
+        held = [
+            name
+            for name, value in (
+                ("TAVILY_API_KEY", self.tavily_api_key),
+                ("FMP_API_KEY", self.fmp_api_key),
+                ("ADZUNA_APP_ID", self.adzuna_app_id),
+                ("ADZUNA_APP_KEY", self.adzuna_app_key),
+                ("SEC_EDGAR_USER_AGENT", self.sec_edgar_user_agent),
+            )
+            if value.strip()
+        ]
+        return [f"the API must not hold {name}; it belongs to the worker only" for name in held]
 
     @property
     def has_ai_provider(self) -> bool:

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import time
 from collections.abc import Mapping
 from uuid import UUID
 
@@ -50,6 +51,7 @@ from scrapr_core.db.models import (
 from scrapr_core.db.models.runs import STEP_LEASE_SECONDS, STEP_MAX_ATTEMPTS
 from scrapr_core.domain.ownership import OwnerContext
 from scrapr_core.jobs.contract import StepContext, StepHandler, StepPermanentError
+from scrapr_core.observability.telemetry import RunLedger, step_telemetry
 
 __all__ = ["JobRunner"]
 
@@ -200,7 +202,9 @@ class JobRunner:
             # A stage with no handler cannot succeed on a later attempt: it is a
             # wiring error, so it poisons the step immediately rather than after
             # three identical failures.
-            self._poison(session, run, step, f"no handler registered for {step.stage!r}")
+            self._poison(
+                session, run, step, f"no handler registered for {step.stage!r}", kind="no_handler"
+            )
             return
 
         self._mark_started(session, run)
@@ -213,19 +217,69 @@ class JobRunner:
             checkpoint=dict(step.checkpoint),
         )
 
-        try:
-            checkpoint = await handler.execute(context)
-        except StepPermanentError as exc:
-            self._poison(session, run, step, str(exc))
-        except Exception as exc:
-            logger.warning("step %s failed on attempt %s", step.id, step.attempt)
-            self._fail(session, run, step, f"{type(exc).__name__}: {exc}")
-        else:
-            # Checkpoint first, then completion. A crash between the two costs
-            # one idempotent re-run; the reverse order would lose the work.
-            step.checkpoint = dict(checkpoint)
-            session.flush()
-            self._complete(session, run, step)
+        started = time.perf_counter()
+        # Everything the step spends — model tokens, tool calls, cost — is
+        # recorded against it as it happens (`REQ-OBS-004`, `DEC-25`).
+        with step_telemetry(session, run.id, step.stage) as telemetry:
+            try:
+                checkpoint = await handler.execute(context)
+            except StepPermanentError as exc:
+                self._record_usage(run, step, telemetry.ledger, started)
+                self._poison(session, run, step, str(exc), kind="permanent")
+            except Exception as exc:
+                logger.warning("step %s failed on attempt %s", step.id, step.attempt)
+                self._record_usage(run, step, telemetry.ledger, started)
+                self._fail(
+                    session,
+                    run,
+                    step,
+                    f"{type(exc).__name__}: {exc}",
+                    kind=f"exception:{type(exc).__name__}",
+                )
+            else:
+                self._record_usage(run, step, telemetry.ledger, started)
+                # Checkpoint first, then completion. A crash between the two
+                # costs one idempotent re-run; the reverse order would lose the
+                # work.
+                step.checkpoint = dict(checkpoint)
+                session.flush()
+                self._complete(session, run, step)
+
+    @staticmethod
+    def _record_usage(
+        run: ResearchRun, step: RunStep, ledger: RunLedger, started: float
+    ) -> None:
+        """Add one step attempt's spend to its run (`REQ-OBS-003..005`).
+
+        Accumulated rather than overwritten: a retried step spent its first
+        attempt too, and a cost report that forgot failed attempts would
+        understate exactly the runs worth investigating.
+        """
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+        tokens = dict(run.tokens or {})
+        stages = dict(tokens.get("by_stage") or {})
+        previous = dict(stages.get(step.stage) or {})
+        stages[step.stage] = {
+            "input_tokens": int(previous.get("input_tokens", 0)) + ledger.input_tokens,
+            "output_tokens": int(previous.get("output_tokens", 0)) + ledger.output_tokens,
+            "model_calls": int(previous.get("model_calls", 0)) + ledger.model_calls,
+            "tool_calls": int(previous.get("tool_calls", 0)) + ledger.tool_calls,
+            "cost_micros": int(previous.get("cost_micros", 0)) + ledger.cost_micros,
+        }
+        tokens["by_stage"] = stages
+        tokens["input_tokens"] = int(tokens.get("input_tokens", 0)) + ledger.input_tokens
+        tokens["output_tokens"] = int(tokens.get("output_tokens", 0)) + ledger.output_tokens
+        tokens["model_calls"] = int(tokens.get("model_calls", 0)) + ledger.model_calls
+        run.tokens = tokens
+        run.cost_micros = (run.cost_micros or 0) + ledger.cost_micros
+
+        effort = dict(run.effort_used or {})
+        timings = dict(effort.get("stage_ms") or {})
+        timings[step.stage] = int(timings.get(step.stage, 0)) + elapsed_ms
+        effort["stage_ms"] = timings
+        effort["tool_calls"] = int(effort.get("tool_calls", 0)) + ledger.tool_calls
+        run.effort_used = effort
 
     def _mark_started(self, session: Session, run: ResearchRun) -> None:
         """Move the run, and the research it belongs to, out of `pending`.
@@ -259,10 +313,10 @@ class JobRunner:
             self._finish_run(session, run, RunStatus.COMPLETE)
 
     def _fail(
-        self, session: Session, run: ResearchRun, step: RunStep, error: str
+        self, session: Session, run: ResearchRun, step: RunStep, error: str, *, kind: str
     ) -> None:
         if step.attempt >= self._max_attempts:
-            self._poison(session, run, step, error)
+            self._poison(session, run, step, error, kind=kind)
             return
 
         step.status = StepStatus.FAILED
@@ -273,14 +327,21 @@ class JobRunner:
         session.flush()
 
     def _poison(
-        self, session: Session, run: ResearchRun, step: RunStep, error: str
+        self, session: Session, run: ResearchRun, step: RunStep, error: str, *, kind: str
     ) -> None:
-        """Stop trying, and stop the run with it."""
+        """Stop trying, and stop the run with it.
+
+        The run records where and why (`REQ-OBS-001`): the stage, and a
+        category a query can group failures by. The full error stays on the
+        step, where only operators read it.
+        """
         step.status = StepStatus.DEAD
         step.error = error
         step.lease_owner = None
         step.lease_expires_at = None
         step.updated_at = utcnow()
+        run.failure_stage = step.stage
+        run.failure_kind = kind
         session.flush()
 
         self._finish_run(session, run, RunStatus.FAILED, TerminationReason.FAILURE)

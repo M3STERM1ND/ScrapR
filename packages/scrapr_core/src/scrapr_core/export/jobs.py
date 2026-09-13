@@ -154,7 +154,7 @@ class ExportProcessor:
             self._release(export_id, attempts, "storage")
             return ProcessedExport(export_id, ready=False, reason="storage", render_ms=render_ms)
 
-        if not self._mark_ready(export_id, key, len(data)):
+        if not self._mark_ready(export_id, key, len(data), render_ms):
             # The research was deleted while this rendered. The row is gone or
             # hidden; the object must not outlive it.
             try:
@@ -214,7 +214,7 @@ class ExportProcessor:
                 export.lease_expires_at = None
                 session.commit()
 
-    def _mark_ready(self, export_id: UUID, key: str, size: int) -> bool:
+    def _mark_ready(self, export_id: UUID, key: str, size: int, render_ms: int) -> bool:
         with self._session_factory() as session:
             row = session.execute(
                 select(Export, ResearchSession.deleted_at)
@@ -229,6 +229,7 @@ class ExportProcessor:
             export.status = ExportStatus.READY
             export.storage_key = key
             export.size_bytes = size
+            export.render_ms = render_ms
             export.error = None
             export.lease_expires_at = None
             export.completed_at = utcnow()

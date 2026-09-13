@@ -62,5 +62,9 @@ class Export(Base):
 
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
 
+    render_ms: Mapped[int | None]
+    """How long building and rendering took, for `TBD-08` and `TBD-09`
+    (`REQ-OBS-003`)."""
+
     created_at: Mapped[CreatedAt]
     completed_at: Mapped[dt.datetime | None]

@@ -15,6 +15,7 @@ a silently dropped registration is a tool that mysteriously never runs.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Sequence
 
 from scrapr_core.tools.contract import (
@@ -116,7 +117,21 @@ class ToolRegistry:
         says failures return rather than raise (`REQ-TOOL-010 AC-1`), and a
         third-party client that violates it must not be able to abort a run —
         `REQ-AGENT-009 AC-1` requires unrelated areas to survive.
+
+        Every outcome is recorded against the running step, when there is one
+        (`REQ-OBS-002`): which tool, how it went, how long it took.
         """
+        # Imported here, not at module level: observability imports the tool
+        # contract, and a module-level import in either direction would make
+        # whichever package loads first unable to finish loading.
+        from scrapr_core.observability.telemetry import record_tool_call
+
+        started = time.perf_counter()
+        outcome = await self._invoke(request)
+        record_tool_call(request, outcome.tool, outcome, started)
+        return outcome
+
+    async def _invoke(self, request: ToolRequest) -> ToolOutcome:
         tool = self._select(request)
         if tool is None:
             return ToolFailure(

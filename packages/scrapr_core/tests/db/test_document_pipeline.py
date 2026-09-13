@@ -376,3 +376,64 @@ def test_the_fixtures_still_describe_what_they_claim() -> None:
     assert REVENUE_EXCERPT in REVENUE_TEXT
     assert DOCUMENT_EXCERPT in DOCUMENT_TEXT
     assert fixture_registry().is_frozen
+
+
+# --------------------------------------------------------------------------
+# A job reads only its own research — `REQ-SEC-011`
+# --------------------------------------------------------------------------
+
+
+async def test_a_run_never_reads_another_sessions_documents(
+    session_factory: sessionmaker[Session], registry: ToolRegistry
+) -> None:
+    """`REQ-SEC-011 AC-2`: a background job cannot read research it does not own.
+
+    Another visitor's upload sits in the same index, matching the same query
+    words. The run's document searches are scoped by the session the run
+    belongs to — a parameter the application sets, never one the query or the
+    retrieved content can name — so nothing of the other upload reaches this
+    run's sources, evidence or tool calls.
+    """
+    from scrapr_core.db.models import ToolInvocation, Upload
+
+    mine = _start(session_factory, with_document=True)
+
+    with session_factory() as session:
+        stranger = OwnerContext.for_anonymous(AnonymousSessionRepository(session).issue().session.id)
+        theirs = ResearchRepository(session, stranger).create_session(objective=OBJECTIVE)
+        uploads = UploadRepository(session, **LIMITS)
+        secret = uploads.create_pending(
+            session_id=theirs.id,
+            filename="their-board-pack.txt",
+            content_type="text/plain",
+            size_bytes=64,
+            storage_key=f"uploads/{theirs.id}/their-board-pack.txt",
+        )
+        uploads.mark_uploaded(secret, size_bytes=64)
+        uploads.mark_ready(
+            secret,
+            [(0, "BRAVO_CONFIDENTIAL Acme Corp revenue of $9.9bn for fiscal 2025.", {"page": 1})],
+        )
+        session.commit()
+        secret_id = secret.id
+
+    await run_pipeline(session_factory, registry, _provider())
+
+    with session_factory() as session:
+        cited_uploads = set(
+            session.execute(select(Source.upload_id).where(Source.upload_id.is_not(None))).scalars()
+        )
+        own_uploads = set(
+            session.execute(select(Upload.id).where(Upload.session_id == mine)).scalars()
+        )
+        assert cited_uploads and cited_uploads <= own_uploads
+        assert secret_id not in cited_uploads
+        assert all(
+            "BRAVO_CONFIDENTIAL" not in (row.excerpt or "") + row.content
+            for row in session.execute(select(Evidence)).scalars()
+        )
+        document_calls = session.execute(
+            select(ToolInvocation).where(ToolInvocation.tool_category == ToolCategory.DOCUMENTS.value)
+        ).scalars().all()
+        assert document_calls
+        assert {call.request_digest["session_id"] for call in document_calls} == {str(mine)}

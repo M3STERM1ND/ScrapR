@@ -16,15 +16,17 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 
-from scrapr_api.deps import CurrentOwner, DbSession, Research
+from scrapr_api.deps import CurrentOwner, DbSession, OptionalAccount, Research
 from scrapr_api.errors import ApiError
+from scrapr_api.limits import enforce_action, record_account_usage
 from scrapr_api.routers.uploads import get_object_store
 from scrapr_api.schemas import ExportOut, ExportRequest
 from scrapr_core.db.enums import ExportStatus, VersionStatus
 from scrapr_core.db.models import Export
 from scrapr_core.db.repositories.exports import ExportRepository
+from scrapr_core.security.limits import EXPORT
 from scrapr_core.storage.objects import StorageError
 
 __all__ = ["research_exports", "router"]
@@ -59,8 +61,10 @@ def request_export(
     session_id: UUID,
     version_number: int,
     body: ExportRequest,
+    request: Request,
     research: Research,
     owner: CurrentOwner,
+    account: OptionalAccount,
     session: DbSession,
 ) -> ExportOut:
     """Queue a PDF or PowerPoint of one version in one theme.
@@ -72,12 +76,18 @@ def request_export(
     version = research.get_version(session_id, version_number)
     if version is None:
         raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", "That research does not exist.")
+
+    # `REQ-SEC-010 AC-2`, `DEC-23`: exports are rate limited, and a refused
+    # request counts as much as an accepted one.
+    enforce_action(session, request, owner, EXPORT)
+
     if version.closed_at is None or version.status is VersionStatus.FAILED:
         raise ApiError(
             status.HTTP_409_CONFLICT,
             "version_not_ready",
             "Only a finished report can be exported. Wait for the research to complete.",
         )
+    record_account_usage(account, "exports_requested")
 
     export, _ = ExportRepository(session, owner).request(version, body.format, body.theme)
     return _out(export, version.version_number)

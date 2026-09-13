@@ -37,7 +37,8 @@ def create_app() -> FastAPI:
     """
     # `REQ-SEC-007 AC-3`: a production process with an unsafe configuration
     # refuses to start, and says every reason at once.
-    problems = get_settings().production_problems()
+    settings = get_settings()
+    problems = settings.production_problems() + settings.api_privilege_problems()
     if problems:
         raise RuntimeError("refusing to start: " + "; ".join(problems))
 

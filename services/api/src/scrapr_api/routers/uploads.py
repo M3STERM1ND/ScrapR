@@ -28,10 +28,11 @@ from __future__ import annotations
 from functools import lru_cache
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 
 from scrapr_api.deps import CurrentOwner, DbSession, Research
 from scrapr_api.errors import ApiError
+from scrapr_api.limits import enforce_action
 from scrapr_api.schemas import (
     UploadOut,
     UploadTicket,
@@ -40,6 +41,7 @@ from scrapr_api.schemas import (
 from scrapr_core.config import Settings, get_settings
 from scrapr_core.db.models import Upload
 from scrapr_core.db.repositories.uploads import UploadRepository
+from scrapr_core.security.limits import UPLOAD
 from scrapr_core.storage.extract import ACCEPTED_TYPES, accepted_types_message
 from scrapr_core.storage.objects import ObjectStore, StorageError, storage_key_for
 
@@ -91,6 +93,7 @@ def _storage_unavailable() -> ApiError:
 def create_upload_ticket(
     session_id: UUID,
     body: UploadTicketRequest,
+    request: Request,
     owner: CurrentOwner,
     research: Research,
     session: DbSession,
@@ -103,6 +106,9 @@ def create_upload_ticket(
     """
     if research.get_session(session_id) is None:
         raise _not_found()
+
+    # `REQ-SEC-010 AC-2`, `DEC-23`: uploads are rate limited.
+    enforce_action(session, request, owner, UPLOAD)
 
     settings = get_settings()
     uploads = _uploads(session, settings)

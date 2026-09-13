@@ -2294,7 +2294,7 @@
     },
     "/v1/research": {
       "post": {
-        "description": "Start research. **202**, because the answer does not exist yet.\n\nThe response is committed rows and nothing else: the run is picked up by\nwhatever is polling `run_steps`, which is what keeps `OPEN-03` a hosting\nquestion (implementation plan \u00a75.6).",
+        "description": "Start research. **202**, because the answer does not exist yet.\n\nThe response is committed rows and nothing else: the run is picked up by\nwhatever is polling `run_steps`, which is what keeps `OPEN-03` a hosting\nquestion (implementation plan \u00a75.6).\n\nCounted against the research limits and refused when the queue is full\n(`REQ-SEC-010 AC-1`, `DEC-23`), before anything is written.",
         "operationId": "create_research_v1_research_post",
         "parameters": [
           {

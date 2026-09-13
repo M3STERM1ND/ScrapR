@@ -76,6 +76,7 @@ from scrapr_core.evidence.normalize import classify_metric
 from scrapr_core.evidence.tiering import registrable_host
 from scrapr_core.jobs.contract import StepContext, StepHandler, StepPermanentError
 from scrapr_core.llm.contract import LLMProvider
+from scrapr_core.observability.telemetry import MeteredProvider, current_telemetry
 from scrapr_core.orchestrator.budget import AreaReservation, RunBudget
 from scrapr_core.orchestrator.extract import extract_from_items
 from scrapr_core.orchestrator.interpret import (
@@ -300,10 +301,24 @@ class ResearchHandler:
                 "research reached the retrieval stage with no planned questions"
             )
 
-        budget = RunBudget()
+        settings = get_settings()
+        # `DEC-25`: the run's cost ceiling, less what earlier steps already
+        # spent. Model calls and charged tool calls spend from it live, through
+        # the step's telemetry, so the budget stops retrieval before a call it
+        # cannot afford rather than noticing afterwards.
+        ceiling = (
+            settings.update_cost_ceiling_micros
+            if context.run.kind is RunKind.UPDATE
+            else settings.run_cost_ceiling_micros
+        )
+        budget = RunBudget(cost_micros=max(0, ceiling - (context.run.cost_micros or 0)))
+        telemetry = current_telemetry()
+        if telemetry is not None:
+            telemetry.budget = budget
+
         # Empty at the start of every run, which is what makes Update Research
         # re-fetch rather than remember (`DEC-19`, `REQ-VER-003 AC-1`).
-        cache = RetrievalCache(ttl_seconds=get_settings().retrieval_cache_ttl_seconds)
+        cache = RetrievalCache(ttl_seconds=settings.retrieval_cache_ttl_seconds)
         summaries: list[JsonMapping] = []
 
         # Areas in plan order: a single area cannot consume more than its
@@ -393,6 +408,7 @@ class ResearchHandler:
 
             before = len(all_sources)
             for question in open_questions:
+                _heartbeat(activity, research.id, _area_label(area_name), version_id, categories)
                 result = await self._research_question(
                     context,
                     question,
@@ -600,6 +616,35 @@ class SynthesizeHandler:
 # --------------------------------------------------------------------------
 # Shared helpers
 # --------------------------------------------------------------------------
+
+
+def _heartbeat(
+    activity: ActivityRepository,
+    session_id: UUID,
+    label: str,
+    version_id: UUID,
+    categories: Sequence[ToolCategory],
+) -> None:
+    """Say the area is still being worked on, if nothing has been said lately.
+
+    `NFR-PERF-003`, `TBD-05`: a silent gap during research is a defect. An
+    area with many questions can spend minutes between its first and last
+    event, so before each question the step repeats the area's own
+    in-progress line once `ACTIVITY_HEARTBEAT_SECONDS` have passed since the
+    session's last event. Same words, so the timeline shows one line that is
+    alive rather than a list of repetitions (`REQ-ACT-002`).
+    """
+    interval = get_settings().activity_heartbeat_seconds
+    last = activity.last_event_at(session_id)
+    if last is not None and (utcnow() - last).total_seconds() < interval:
+        return
+    activity.append(
+        session_id,
+        label,
+        ActivityStatus.IN_PROGRESS,
+        version_id=version_id,
+        tool_category=categories[0].value if categories else None,
+    )
 
 
 def _research_session(context: StepContext) -> ResearchSession:
@@ -955,6 +1000,10 @@ def build_handlers(
     provider: LLMProvider, registry: ToolRegistry
 ) -> dict[str, StepHandler]:
     """The stage-to-handler map the runner is wired with."""
+    # Metered once, here, so every stage's model calls are counted against the
+    # step that made them (`REQ-OBS-004`) without any stage knowing.
+    if not isinstance(provider, MeteredProvider):
+        provider = MeteredProvider(provider)
     return {
         INTERPRET_STAGE: InterpretHandler(provider=provider),
         PLAN_STAGE: PlanHandler(provider=provider, registry=registry),

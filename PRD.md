@@ -2131,20 +2131,20 @@ The data model MUST allow reconstructing why any claim in any version was made.
 
 ## 9. Non-Functional Requirements
 
-The masterplan sets no numeric targets. Every value below is therefore `TBD` and owned by an entry in §13. The categories are fixed; the numbers are not yet decided and MUST NOT be invented during implementation.
+The masterplan sets no numeric targets. Every value below was `TBD` and owned by an entry in §13. **All thirteen are now set** by `DEC-24` and `DEC-25` (`docs/decisions/OPEN-18-23-29-03.md`) as initial targets derived from the enforced ceilings and provider behaviour, and each is measured in production by the Phase 8 observability (`scrapr-ops report`) so the first weeks of traffic can confirm or move it.
 
 ### 9.1 Performance
 
 | ID | Requirement | Value |
 |---|---|---|
-| `NFR-PERF-001` | Typical research run completes within a bounded time, p50 | `TBD-03` |
-| `NFR-PERF-002` | Hard ceiling on a single research run, after which it terminates and reports partial results | `TBD-04` |
-| `NFR-PERF-003` | Maximum interval between activity events during active research | `TBD-05` |
-| `NFR-PERF-004` | Workspace initial render time for a completed report, p95 | `TBD-06` |
-| `NFR-PERF-005` | Conversational answer latency when answerable from existing evidence, p50 | `TBD-07` |
-| `NFR-PERF-006` | PDF export generation time, p95 | `TBD-08` |
-| `NFR-PERF-007` | PowerPoint export generation time, p95 | `TBD-09` |
-| `NFR-PERF-008` | Individual tool call timeout | `TBD-02` |
+| `NFR-PERF-001` | Typical research run completes within a bounded time, p50 | `TBD-03` = **4 minutes** |
+| `NFR-PERF-002` | Hard ceiling on a single research run, after which it terminates and reports partial results | `TBD-04` = **15 minutes** |
+| `NFR-PERF-003` | Maximum interval between activity events during active research | `TBD-05` = **30 seconds** |
+| `NFR-PERF-004` | Workspace initial render time for a completed report, p95 | `TBD-06` = **2.5 seconds** |
+| `NFR-PERF-005` | Conversational answer latency when answerable from existing evidence, p50 | `TBD-07` = **8 seconds** |
+| `NFR-PERF-006` | PDF export generation time, p95 | `TBD-08` = **30 seconds** |
+| `NFR-PERF-007` | PowerPoint export generation time, p95 | `TBD-09` = **30 seconds** |
+| `NFR-PERF-008` | Individual tool call timeout | `TBD-02` = **30 seconds** |
 
 `NFR-PERF-003` exists because visible research activity is the masterplan's stated mitigation for long research times (§23). A silent gap longer than the threshold is a defect, not merely slow.
 
@@ -2152,16 +2152,16 @@ The masterplan sets no numeric targets. Every value below is therefore `TBD` and
 
 | ID | Requirement | Value |
 |---|---|---|
-| `NFR-COST-001` | Maximum AI and API cost for a single research run | `TBD-10` |
-| `NFR-COST-002` | Maximum cost for an Update Research run | `TBD-11` |
+| `NFR-COST-001` | Maximum AI and API cost for a single research run | `TBD-10` = **$2.00** |
+| `NFR-COST-002` | Maximum cost for an Update Research run | `TBD-11` = **$1.50** |
 | `NFR-COST-003` | Cost per run MUST be measurable before V1 launch (`REQ-OBS-005`) | Required |
 
 ### 9.3 Scale
 
 | ID | Requirement | Value |
 |---|---|---|
-| `NFR-SCALE-001` | Concurrent in-flight research runs supported | `TBD-12` |
-| `NFR-SCALE-002` | Research queue depth beyond which new runs are shed or queued with notice | `TBD-13` |
+| `NFR-SCALE-001` | Concurrent in-flight research runs supported | `TBD-12` = **20** |
+| `NFR-SCALE-002` | Research queue depth beyond which new runs are shed or queued with notice | `TBD-13` = **100 pending runs** |
 
 ### 9.4 Reliability
 
@@ -2494,7 +2494,7 @@ The eight phases are the masterplan's, unchanged. Each phase has a success condi
 
 **Goal:** Prove the core research loop.
 **Requirements:** `REQ-INPUT-001..003`, `REQ-INPUT-005..007`, `REQ-AGENT-001..010`, `REQ-TOOL-001..007`, `REQ-TOOL-009..013`, `REQ-ACT-001`, `REQ-EVID-001`, `REQ-EVID-004`, `REQ-EVID-007`, `REQ-EVID-010`, `REQ-EVID-017..018`, `REQ-SYNTH-001`, `REQ-SYNTH-003..005`, `REQ-SYNTH-009..010`, `REQ-DATA-002`, `REQ-DATA-004..007`, `REQ-DATA-011`, `REQ-TECH-001..010`, `REQ-SEC-007`, `REQ-SEC-012..014`
-**Blocking open questions:** `OPEN-03`. `OPEN-04` is closed by `DEC-06`, `OPEN-05..09` by `DEC-07`, `OPEN-10` by `DEC-12`, `OPEN-13` by `DEC-04`.
+**Blocking open questions:** none remain. ~~`OPEN-03`~~ is closed by `DEC-26`, `OPEN-04` by `DEC-06`, `OPEN-05..09` by `DEC-07`, `OPEN-10` by `DEC-12`, `OPEN-13` by `DEC-04`.
 **Exit condition:** One query reliably becomes a useful source-backed report.
 
 ### Phase 2 — Evidence & Trust
@@ -2545,7 +2545,7 @@ The eight phases are the masterplan's, unchanged. Each phase has a success condi
 
 **Goal:** Make the product reliable enough for real users.
 **Requirements:** `REQ-SEC-006`, `REQ-SEC-010..011`, `REQ-SEC-013..015` (hardening pass), `REQ-OBS-001..008`, all `NFR-*`
-**Blocking open questions:** `OPEN-18`, `OPEN-23`, `OPEN-29`
+**Blocking open questions:** none remain. ~~`OPEN-18`~~ closed by `DEC-23`, ~~`OPEN-23`~~ by `DEC-24`, ~~`OPEN-29`~~ by `DEC-25`; ~~`OPEN-03`~~ by `DEC-26`.
 **Exit condition:** The product is reliable enough for real users, and every `TBD` in §9 has a value.
 
 ### 12.1 Phase discipline
@@ -2568,7 +2568,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
-| `OPEN-03` | Which queue/worker technology for background research and export jobs, **and where do those workers execute**? Vercel is the confirmed deployment platform (`DEC-03`) and its serverless execution limits may be exceeded by research runs and export generation. The answer must state how a run exceeding that limit satisfies `NFR-REL-001`. See §11.5. `websitedesign.md` says "Redis + workers"; that is shorthand, not a decision, and it says nothing about worker execution location. See implementation plan `N-05`. | Phase 1 | A |
+| ~~`OPEN-03`~~ | **Closed by `DEC-26`**, 2026-09-13. Dispatch is Postgres (`FOR UPDATE SKIP LOCKED` over `run_steps`, `uploads`, `exports`); workers execute as long-running containers off Vercel, so no run meets a serverless limit, and every step is checkpointed so a restart resumes (`NFR-REL-001`). The container host vendor is a deployment choice with no code consequence and is left to deployment. | — | — |
 | ~~`OPEN-04`~~ | **Closed by `DEC-06`**, 2026-09-12. Anthropic, with `CHEAP`/`STANDARD`/`DEEP` mapped to Haiku 4.5 / Sonnet 5 / Opus 5 as configuration. See `docs/decisions/OPEN-04.md`. | — | — |
 | ~~`OPEN-10`~~ | **Closed by `DEC-12`**, 2026-09-12. The S3 API is the contract; Cloudflare R2 in production, MinIO in docker compose locally. Vercel Blob rejected despite `DEC-03`: no S3 surface, so no local equivalent. See `docs/decisions/OPEN-10.md`. | — | — |
 | ~~`OPEN-11`~~ | **Closed by `DEC-16`**, 2026-09-13. First-party email and password: Argon2id hashes, server-side sessions in Postgres behind an `HttpOnly` cookie, 30-day absolute lifetime, rate-limited sign-in. No password reset until an email provider exists. See `docs/decisions/OPEN-11-17-24.md`. | — | — |
@@ -2591,7 +2591,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 |---|---|---|---|
 | ~~`OPEN-13`~~ | **Closed by `DEC-04`**, 2026-09-09. Research sufficiency and termination criteria. See §13.10 and `docs/decisions/OPEN-13.md`. | — | — |
 | ~~`OPEN-26`~~ | **Closed by `DEC-19`**, 2026-09-13. The retrieval cache lives for one run (TTL within it configurable) and never crosses runs, sessions or users, so Update Research re-fetches everything by construction. No evidence is reused across versions. Updates re-ask the previous plan's questions, stale and volatile areas first. See `docs/decisions/OPEN-26-27.md`. | — | — |
-| `OPEN-29` | What is the acceptable cost ceiling per research run, and what happens when a run approaches it? Sets `TBD-10` and `TBD-11`. | Phase 8 | Both |
+| ~~`OPEN-29`~~ | **Closed by `DEC-25`**, 2026-09-13. $2.00 per research run, $1.50 per update; model tokens and tool calls metered live against the run budget, which stops retrieval before a call it cannot afford; the run then synthesizes what it has and completes as partial with a named ceiling. See `docs/decisions/OPEN-18-23-29-03.md`. | — | — |
 
 ### 13.4 Evidence and trust
 
@@ -2607,7 +2607,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
 | ~~`OPEN-17`~~ | **Closed by `DEC-17`**, 2026-09-13. A hashed 256-bit cookie token; 30 days since last activity, then expired and purged; claimable while valid, automatically on sign-up and sign-in or via `POST /v1/research/claim`, in one transaction that can only select the caller's own anonymous session. | — | — |
-| `OPEN-18` | How is the anonymous flow rate limited without an account to attribute usage to? Anonymous research is expensive and uncapped by default. | Phase 8 | Both |
+| ~~`OPEN-18`~~ | **Closed by `DEC-23`**, 2026-09-13. Every expensive action is counted per anonymous session, per account and per client address at once, in Postgres; research is also shed at the door past `TBD-13`. See `docs/decisions/OPEN-18-23-29-03.md`. | — | — |
 | ~~`OPEN-24`~~ | **Closed by `DEC-18`**, 2026-09-13. Hard delete, no retention window: hidden and stopped in the request, files removed from storage at once, every row purged within 30 minutes. Versions and exports go with the session. A deleted upload keeps its metadata row so prior versions record that it existed. | — | — |
 
 ### 13.6 Documents
@@ -2628,25 +2628,25 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
-| `OPEN-23` | What are the values for `TBD-01` through `TBD-13` in §9? All must be set from Phase 1 and Phase 3 measurements and fixed before Phase 8 completes. Shipping with unset values is a release blocker. | Phase 8 | Both |
+| ~~`OPEN-23`~~ | **Closed by `DEC-24`**, 2026-09-13. Every `TBD` set (§9, §13.9) as initial targets from the enforced ceilings and provider behaviour, because no production traffic exists to measure; each is now recorded and reported by `scrapr-ops report` for confirmation against real runs. | — | — |
 
 ### 13.9 TBD value index
 
-| TBD | Value needed | Owning question |
-|---|---|---|
-| `TBD-01` | Maximum objective length | `OPEN-23` |
-| `TBD-02` | Individual tool call timeout | `OPEN-23` |
-| `TBD-03` | Research run p50 completion time | `OPEN-23` |
-| `TBD-04` | Hard ceiling on a single research run | `OPEN-23` (mechanism fixed by `DEC-04`; value still unset) |
-| `TBD-05` | Maximum interval between activity events | `OPEN-23` |
-| `TBD-06` | Workspace render time p95 | `OPEN-23` |
-| `TBD-07` | Conversational answer latency p50 | `OPEN-23` |
-| `TBD-08` | PDF generation time p95 | `OPEN-23` |
-| `TBD-09` | PPTX generation time p95 | `OPEN-23` |
-| `TBD-10` | Maximum cost per research run | `OPEN-29` |
-| `TBD-11` | Maximum cost per Update Research run | `OPEN-29` |
-| `TBD-12` | Concurrent in-flight research runs | `OPEN-23` |
-| `TBD-13` | Queue depth shed threshold | `OPEN-23` |
+| TBD | Value needed | Set to | By |
+|---|---|---|---|
+| `TBD-01` | Maximum objective length | 2,000 characters | `DEC-24` |
+| `TBD-02` | Individual tool call timeout | 30 seconds | `DEC-24` |
+| `TBD-03` | Research run p50 completion time | 4 minutes | `DEC-24` |
+| `TBD-04` | Hard ceiling on a single research run | 15 minutes | `DEC-24` (mechanism `DEC-04`) |
+| `TBD-05` | Maximum interval between activity events | 30 seconds | `DEC-24` |
+| `TBD-06` | Workspace render time p95 | 2.5 seconds | `DEC-24` |
+| `TBD-07` | Conversational answer latency p50 | 8 seconds | `DEC-24` |
+| `TBD-08` | PDF generation time p95 | 30 seconds | `DEC-24` |
+| `TBD-09` | PPTX generation time p95 | 30 seconds | `DEC-24` |
+| `TBD-10` | Maximum cost per research run | $2.00 | `DEC-25` |
+| `TBD-11` | Maximum cost per Update Research run | $1.50 | `DEC-25` |
+| `TBD-12` | Concurrent in-flight research runs | 20 | `DEC-24` |
+| `TBD-13` | Queue depth shed threshold | 100 pending runs | `DEC-24` |
 
 ### 13.10 Resolved decisions log
 
@@ -2671,7 +2671,12 @@ Decisions the masterplan did not make and the team has since confirmed. These ar
 | `DEC-21` | **Exports are rendered in the worker, in Python, from the version's rows.** ReportLab (PDF, embedded fonts, vector charts) and python-pptx (PowerPoint, native charts and tables); no headless browser and no model call; deterministic output, so a retry is byte-identical. Full record: `docs/decisions/OPEN-21-22.md`. | `OPEN-21` | `REQ-EXP-001`, `REQ-EXP-002`, `REQ-EXP-004..008` | 2026-09-13 |
 | `DEC-22` | **Six fixed themes** — Professional, Investor, Modern, Corporate, Minimal, Dark — each a static definition with AA contrast, and every distinction `REQ-EXP-009` requires carried by words and rule treatment in all of them. | `OPEN-22` | `REQ-EXP-003`, `REQ-EXP-009`, `NFR-USE-002` | 2026-09-13 |
 
-**Open questions remaining** after `DEC-22`: `OPEN-03` (narrowed), `OPEN-18`, `OPEN-23`, `OPEN-29`.
+| `DEC-23` | **Abuse controls: every expensive action counted per anonymous session, per account and per address**, with research shed past the queue threshold, request bodies capped at 1 MB and cross-origin writes refused. Full record: `docs/decisions/OPEN-18-23-29-03.md`. | `OPEN-18` | `REQ-SEC-010`, `REQ-AUTH-009` | 2026-09-13 |
+| `DEC-24` | **Every `TBD` set** as initial targets (§9), each measured and reported in production. | `OPEN-23` | all `NFR-*`, `TBD-01..09`, `TBD-12..13` | 2026-09-13 |
+| `DEC-25` | **Cost ceilings: $2.00 per research run, $1.50 per update**, metered live against the run budget; a run at its ceiling completes as partial. | `OPEN-29` | `NFR-COST-001..003`, `REQ-OBS-004..005`, `TBD-10..11` | 2026-09-13 |
+| `DEC-26` | **Workers run as long-lived containers off Vercel, dispatched by Postgres.** Host vendor left to deployment. | `OPEN-03`, `N-04` | `REQ-TECH-005`, `REQ-TECH-010`, `NFR-REL-001`, §11.5 | 2026-09-13 |
+
+**Open questions remaining** after `DEC-26`: none. Provider selections with no code consequence — database hosting (`N-01`) and the worker container host — are deployment steps recorded in the README.
 
 ---
 
@@ -2700,7 +2705,7 @@ These are not new product decisions; they are gaps the masterplan's own requirem
 | **Unbounded research runs** | *Mitigated by `DEC-04`.* The masterplan required adaptive depth and agent-determined sufficiency but defined no stopping rule. The coverage gate supplies one; the residual risk is that the numeric ceilings (`TBD-04`, `TBD-10`) ship unset. | `DEC-04`, `OPEN-23`, `OPEN-29`, `REQ-AGENT-005` |
 | **Coverage gate rests on question quality** | `DEC-04` measures sufficiency against the questions stage 2 plans. Vague or overlapping questions make coverage a meaningless gate, and a shallow area is declared sufficient. | `REQ-AGENT-002 AC-3`, `DEC-04` §12 |
 | **Anonymous research has no owner** | *Mitigated by `DEC-17`.* Full anonymous use (§17) and private-by-default (§18) are both required, but privacy needs an owner to isolate to. The anonymous session is that owner, with a defined lifetime and claim path. | `DEC-17`, `REQ-AUTH-002`, `REQ-SEC-009` |
-| **Uncapped anonymous cost** | Anonymous users can trigger expensive research with no account to attribute or limit it. | `OPEN-18`, `REQ-SEC-010` |
+| **Uncapped anonymous cost** | *Mitigated by `DEC-23` and `DEC-25`.* Anonymous users can trigger expensive research with no account to attribute or limit it; they are now limited per session and per address, and every run is capped in cost. | `DEC-23`, `DEC-25`, `REQ-SEC-010` |
 | **Conflict detection tuned too tight or too loose** | With no defined numeric tolerance, the product either reports rounding differences as conflicts or misses real disagreement. Both undermine the trust core. | `OPEN-16`, `REQ-EVID-012` |
 
 ---

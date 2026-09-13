@@ -370,7 +370,8 @@ uploads(
 upload_chunks(
   id uuid pk, upload_id uuid not null, ordinal int not null,
   text text not null, locator jsonb not null,   -- page / sheet / cell range
-  embedding vector null                          -- only if OPEN-12 says vector search is needed
+  -- no embedding column: DEC-15 closed OPEN-12 against vector search, and
+  -- migration 0004 adds a GIN index on to_tsvector('english', text) instead
 )
 
 exports(
@@ -662,7 +663,7 @@ This deliberately removes `N-03` from the Phase 1 critical path. It remains open
 | `research.initial` | `POST /research` | interpret → plan → loop(retrieve, extract, normalize, dedupe/tier, sufficiency) → conflict → confidence → synthesize → visualize → validate → close version |
 | `research.update` | `POST /research/{id}/update` | prioritize changed areas → same loop with cache bypass → compare versions → What's Changed → close version |
 | `research.conversation` | `POST /messages` | ground in existing evidence → if insufficient, run a scoped retrieve loop → answer with citations |
-| `upload.process` | `POST /uploads/{id}/complete` | fetch → extract → chunk → (embed if `OPEN-12`) → mark ready |
+| `upload.process` | worker poll after `POST /uploads/{id}/complete` | claim → fetch → detect type → extract → chunk → mark ready, or `failed` with a reason |
 | `export.generate` | `POST /exports` | load version → map to theme → render → store → mark ready |
 
 ### 7.2 Rules
@@ -736,9 +737,9 @@ class Untrusted:              # every web page, search result, uploaded document
 `REQ-DOC-001..010`, Phase 4.
 
 1. **Upload** via presigned PUT direct to object storage. The API never proxies file bytes. Server-side enforcement of size, count and type (`REQ-DOC-010 AC-1`) happens at presign time and again at `complete`, since a presigned URL is not a limit.
-2. **Extract** per format: PDF, DOCX, spreadsheet (`OPEN-20` sets the full list). Extraction failure marks the upload `failed` and it stays visible (`REQ-DOC-003 AC-3`); it never becomes a silently empty document.
+2. **Extract** per format: PDF, DOCX, XLSX, CSV, TXT and MD (`DEC-14` sets the full list). Extraction failure marks the upload `failed` and it stays visible (`REQ-DOC-003 AC-3`); it never becomes a silently empty document.
 3. **Chunk** with a locator (page, sheet, cell range) so a citation resolves to a place in the file, not to the file as a whole.
-4. **Search** through the same tool contract as external sources (`REQ-TOOL-008`). Retrieval method is `OPEN-12`: keyword search may well be enough for V1, and Postgres full-text search is the fallback if vector search is deferred. `REQ-TECH-007` prefers a Postgres extension over a second datastore either way.
+4. **Search** through the same tool contract as external sources (`REQ-TOOL-008`). `DEC-15` settled the retrieval method: Postgres full-text search, no vectors. The corpus is one user's ten files, which is where keyword recall is high. One caveat learned the hard way: the query is `"{subject}: {question}"`, so the terms must be **OR**ed and ranked. `plainto_tsquery` and `websearch_to_tsquery` both AND them, and a passage inside a reader's own document does not repeat the company name — an AND query finds nothing in almost every real file.
 5. **Attribute separately.** Document-derived sources carry `category = 'document'` and a non-null `upload_id`. The workspace renders them visibly differently and they are **excluded from corroboration counting** in confidence scoring (`REQ-DOC-008 AC-3`).
 6. **Untrusted, always** (§9). A document is evidence about the document, never a command.
 
@@ -786,7 +787,7 @@ The six **export** themes (`REQ-EXP-003`) are a third system, separate from both
 | Application API (FastAPI) | Vercel | Decided in principle, **runtime shape unclear** — see `N-02` |
 | Workers | Not decided | `OPEN-03` |
 | PostgreSQL | Not decided | **Unregistered gap** — see `N-01` |
-| Object storage | Not decided | `OPEN-10` |
+| Object storage | Cloudflare R2 | **Decided** (`DEC-12`); S3 API is the contract, MinIO locally |
 | Queue / dispatch | Not decided | `OPEN-03` |
 | Secrets | Environment config, validated at startup | `REQ-SEC-007 AC-3` |
 
@@ -882,7 +883,7 @@ This is the heaviest B phase. **Recommend A picks up activity and viz-spec work 
 **Exit:** users can interrogate the research, not just read it.
 
 ### Phase 4 — Documents
-**Blocked by:** `OPEN-19`, `OPEN-20`, and `OPEN-12` decided.
+**Blocked by:** nothing. `OPEN-10` closed by `DEC-12`, `OPEN-12` by `DEC-15`, `OPEN-19` by `DEC-13`, `OPEN-20` by `DEC-14`.
 
 A: upload processing, extraction, chunking, document tool, contradiction detection, separate attribution.
 B: upload UI, processing states, document citation treatment.

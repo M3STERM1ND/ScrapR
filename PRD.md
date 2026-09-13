@@ -1536,7 +1536,7 @@ The system MUST accept PDF, DOCX, and spreadsheet files, and SHOULD accept other
 **Acceptance criteria**
 - `AC-1` PDF, DOCX, and spreadsheet uploads succeed and are processed.
 - `AC-2` Unsupported types are rejected with a clear message naming the supported types.
-- `AC-3` The full supported-type list is defined in `OPEN-20`.
+- `AC-3` The full supported-type list is defined in `DEC-14`: PDF, DOCX, XLSX, CSV, TXT, MD.
 
 ---
 
@@ -1548,7 +1548,7 @@ Uploaded files MUST be stored in object storage with metadata persisted in the d
 **Acceptance criteria**
 - `AC-1` Upload records file metadata, storage location, and its relationship to the research session (`REQ-DATA-009`).
 - `AC-2` Files are stored securely (`REQ-SEC-005`).
-- `AC-3` Size and count limits are enforced (`OPEN-19`).
+- `AC-3` Size and count limits are enforced (`DEC-13`).
 
 ---
 
@@ -1641,7 +1641,7 @@ The system MUST enforce limits on upload size, count per session, and file type.
 **Acceptance criteria**
 - `AC-1` Limits are enforced server-side, not only in the browser.
 - `AC-2` Exceeding a limit produces a clear message.
-- `AC-3` Limit values are defined in `OPEN-19`.
+- `AC-3` Limit values are defined in `DEC-13`: 25 MB per file, 10 files per session, 100 MB per session.
 
 ---
 
@@ -2396,10 +2396,10 @@ This section records only what `masterplan.md` §19 actually decided. Everything
 | `REQ-TECH-001` | **Frontend: Next.js (React)** | The masterplan requires a React-based web application, "preferably a modern full-stack React framework where practical". **Next.js is confirmed** (§13.10, `DEC-01`). Responsibilities: research input, activity display, interactive report, charts and tables, conversation, authentication UI, export controls. |
 | `REQ-TECH-002` | **Backend: Python with FastAPI** | The masterplan requires a Python API/service layer for AI orchestration, research workflows, data processing, document processing, and API integrations. **FastAPI is confirmed** (§13.10, `DEC-02`). |
 | `REQ-TECH-003` | **Database: PostgreSQL** | Holds users, sessions, versions, claims, sources, evidence, conversations, exports, and usage metadata. |
-| `REQ-TECH-004` | **Object storage** | For uploaded documents, generated PDFs, PowerPoint files, and other large artifacts. Provider: `OPEN-10`. |
+| `REQ-TECH-004` | **Object storage** | For uploaded documents, generated PDFs, PowerPoint files, and other large artifacts. The S3 API is the contract (`DEC-12`): Cloudflare R2 in production, MinIO in docker compose locally. |
 | `REQ-TECH-005` | **Queue/worker background processing** | Research and export jobs run asynchronously so long tasks never block web requests. Technology: `OPEN-03`. |
 | `REQ-TECH-006` | **AI provider abstraction** | The AI provider MUST sit behind an abstraction so the product is not permanently tied to one model provider. Providers: `OPEN-04`. |
-| `REQ-TECH-007` | **Vector search via PostgreSQL extension preferred** | If vector search is needed, prefer a PostgreSQL extension over introducing a second datastore, provided it meets V1 requirements. Necessity: `OPEN-12`. |
+| `REQ-TECH-007` | **Vector search via PostgreSQL extension preferred** | If vector search is needed, prefer a PostgreSQL extension over introducing a second datastore, provided it meets V1 requirements. `DEC-15` found it is not needed in V1: document retrieval runs on PostgreSQL full-text search, and `pgvector` stays a column and an index away. |
 | `REQ-TECH-008` | **Standardized external data interfaces** | Web search, financial data, filings, jobs, news, and future tools all conform to the tool contract (`REQ-TOOL-001`). |
 | `REQ-TECH-009` | **Web application only** | No native mobile application in V1 (§5.2). |
 | `REQ-TECH-010` | **Deployment platform: Vercel** | **Confirmed** (§13.10, `DEC-03`). The Next.js frontend and the application API deploy to Vercel. Long-running research and export workers are subject to `REQ-TECH-005` and the serverless execution constraint noted in §11.5; where they cannot run within Vercel's execution limits they run on a platform selected under `OPEN-03`. |
@@ -2494,8 +2494,7 @@ The eight phases are the masterplan's, unchanged. Each phase has a success condi
 
 **Goal:** Prove the core research loop.
 **Requirements:** `REQ-INPUT-001..003`, `REQ-INPUT-005..007`, `REQ-AGENT-001..010`, `REQ-TOOL-001..007`, `REQ-TOOL-009..013`, `REQ-ACT-001`, `REQ-EVID-001`, `REQ-EVID-004`, `REQ-EVID-007`, `REQ-EVID-010`, `REQ-EVID-017..018`, `REQ-SYNTH-001`, `REQ-SYNTH-003..005`, `REQ-SYNTH-009..010`, `REQ-DATA-002`, `REQ-DATA-004..007`, `REQ-DATA-011`, `REQ-TECH-001..010`, `REQ-SEC-007`, `REQ-SEC-012..014`
-**Blocking open questions:** `OPEN-03`, `OPEN-04`, `OPEN-05`, `OPEN-06`, `OPEN-07`, `OPEN-08`, `OPEN-09`, `OPEN-10`
-`OPEN-13` is closed by `DEC-04`.
+**Blocking open questions:** `OPEN-03`. `OPEN-04` is closed by `DEC-06`, `OPEN-05..09` by `DEC-07`, `OPEN-10` by `DEC-12`, `OPEN-13` by `DEC-04`.
 **Exit condition:** One query reliably becomes a useful source-backed report.
 
 ### Phase 2 — Evidence & Trust
@@ -2518,7 +2517,7 @@ The eight phases are the masterplan's, unchanged. Each phase has a success condi
 
 **Goal:** Let user-supplied evidence join the research.
 **Requirements:** `REQ-INPUT-004`, `REQ-TOOL-008`, `REQ-DOC-001..010`, `REQ-DATA-009`, `REQ-SEC-005`
-**Blocking open questions:** `OPEN-19`, `OPEN-20`
+**Blocking open questions:** none remain. ~~`OPEN-19`~~ closed by `DEC-13`, ~~`OPEN-20`~~ by `DEC-14`, ~~`OPEN-10`~~ by `DEC-12`, ~~`OPEN-12`~~ by `DEC-15`.
 **Exit condition:** A user can provide a document and have the agent incorporate it into research.
 
 ### Phase 5 — Accounts & Persistence

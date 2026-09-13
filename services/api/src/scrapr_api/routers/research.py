@@ -24,6 +24,8 @@ from scrapr_api.schemas import (
     ActivityEventOut,
     ActivityPage,
     ClaimOut,
+    ConflictOut,
+    ConflictSideOut,
     CreateResearchRequest,
     CreateResearchResponse,
     ResearchSessionOut,
@@ -32,7 +34,15 @@ from scrapr_api.schemas import (
     VersionOut,
     VersionSummary,
 )
-from scrapr_core.db.models import Claim, ClaimEvidence, Evidence, ReportSection, Source
+from scrapr_core.db.models import (
+    Claim,
+    ClaimEvidence,
+    Conflict,
+    ConflictEvidence,
+    Evidence,
+    ReportSection,
+    Source,
+)
 from scrapr_core.db.repositories import ActivityRepository, ResearchRepository, RunRepository
 from scrapr_core.orchestrator.pipeline import STAGES
 
@@ -163,6 +173,37 @@ def get_version(
         if source_id not in citations[claim_id]:
             citations[claim_id].append(source_id)
 
+    # Conflicts, with both sides and the source behind each (`REQ-WORK-009
+    # AC-1`). Loaded in one pass for the same reason the citation map is: a
+    # report with several contested claims would otherwise be a query apiece.
+    conflict_rows = (
+        session.execute(
+            select(Conflict)
+            .where(Conflict.version_id == version.id)
+            .order_by(Conflict.id)
+        )
+        .scalars()
+        .all()
+    )
+    sides: dict[UUID, list[ConflictSideOut]] = {row.id: [] for row in conflict_rows}
+    if sides:
+        for conflict_id, evidence, label in session.execute(
+            select(ConflictEvidence.conflict_id, Evidence, ConflictEvidence.label)
+            .join(Evidence, Evidence.id == ConflictEvidence.evidence_id)
+            .where(ConflictEvidence.conflict_id.in_(sides.keys()))
+        ).all():
+            sides[conflict_id].append(
+                ConflictSideOut(
+                    evidence_id=evidence.id,
+                    source_id=evidence.source_id,
+                    label=label,
+                    # The reported form, never the normalised one
+                    # (`REQ-EVID-008 AC-2`): a reader comparing two values must
+                    # see what each source actually published.
+                    value=evidence.value_raw or evidence.content,
+                )
+            )
+
     return VersionOut(
         id=version.id,
         session_id=version.session_id,
@@ -188,6 +229,7 @@ def get_version(
                 text=claim.text,
                 claim_type=claim.claim_type,
                 confidence=claim.confidence,
+                confidence_rationale=_rationale(claim),
                 is_important=claim.is_important,
                 source_ids=citations[claim.id],
             )
@@ -205,7 +247,29 @@ def get_version(
             )
             for source in sources
         ],
+        conflicts=[
+            ConflictOut(
+                id=row.id,
+                claim_id=row.claim_id,
+                status=row.status,
+                explanation=row.explanation,
+                explanation_category=row.explanation_category,
+                sides=sides[row.id],
+            )
+            for row in conflict_rows
+        ],
     )
+
+
+def _rationale(claim: Claim) -> str | None:
+    """The sentence explaining a claim's confidence (`REQ-DATA-012`).
+
+    Read from what the pipeline stored rather than recomputed here: the API
+    must show the reasoning that actually produced the level, not a second
+    opinion formed from the same inputs at a different time.
+    """
+    value = claim.confidence_inputs.get("rationale")
+    return value if isinstance(value, str) else None
 
 
 @router.get("/{session_id}/activity")

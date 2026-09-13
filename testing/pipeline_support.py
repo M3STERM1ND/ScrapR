@@ -31,9 +31,13 @@ from scrapr_core.tools import ToolCategory, ToolRegistry
 from scrapr_core.tools.impl import FixtureTool, fixture_item
 
 __all__ = [
+    "DISPUTED",
     "REVENUE_EXCERPT",
     "REVENUE_TEXT",
+    "cite_everything",
     "default_synthesis",
+    "disputed_registry",
+    "disputing_provider",
     "fixture_registry",
     "run_pipeline",
     "scripted_provider",
@@ -191,3 +195,97 @@ async def run_pipeline(
     provider.enqueue(synthesis(evidence_ids))
 
     await runner.run_one()  # synthesize
+
+
+# --------------------------------------------------------------------------
+# A run whose sources contradict each other
+# --------------------------------------------------------------------------
+
+DISPUTED = (
+    "Acme Corp reported revenue of USD 1.2bn for fiscal 2025.",
+    "Acme Corp reported revenue of USD 1.9bn for fiscal 2025.",
+)
+"""Two sources, same metric, same period, same currency, 58% apart.
+
+Every other fixture here agrees with itself, which means conflict detection is
+reachable in principle and never reached in practice. Proving that code runs
+takes a provider that contradicts itself, and it lives in the shared harness
+rather than in one suite because two suites now need it — the core integration
+tests and the API contract tests.
+"""
+
+DISPUTED_QUESTION = "What is Acme's revenue?"
+
+
+def disputed_registry() -> ToolRegistry:
+    """Web search returning two irreconcilable figures."""
+    registry = ToolRegistry()
+    registry.register(search_tool(texts=DISPUTED, host="reuters.com"))
+    registry.freeze()
+    return registry
+
+
+def disputing_provider() -> FakeLLMProvider:
+    """A provider that extracts both figures rather than the standing pair.
+
+    `scripted_provider` carries a fixed standing extraction, so whatever a
+    fixture publishes, the evidence written is the same two sentences — and the
+    grounding check drops anything else. Conflict detection compares the
+    numbers *in the evidence*, so exercising it needs extraction that actually
+    reads the disputed figures.
+    """
+    provider = FakeLLMProvider(
+        standing_response=Extraction(
+            evidence=[
+                ExtractedEvidence(
+                    statement=DISPUTED[0],
+                    excerpt="revenue of USD 1.2bn",
+                    item_index=0,
+                ),
+                ExtractedEvidence(
+                    statement=DISPUTED[1],
+                    excerpt="revenue of USD 1.9bn",
+                    item_index=1,
+                ),
+            ]
+        )
+    )
+    provider.enqueue(
+        Interpretation(
+            subject="Acme Corp",
+            interpretation_note=None,
+            questions=[DISPUTED_QUESTION],
+        ),
+        _PlanDraft(
+            areas=[
+                _PlanDraft.Area(
+                    name="Financial performance",
+                    questions=[DISPUTED_QUESTION],
+                    tool_categories=["web_search"],
+                )
+            ]
+        ),
+    )
+    return provider
+
+
+def cite_everything(evidence_ids: Sequence[UUID]) -> SynthesisDraft:
+    """A report whose single fact cites every piece of evidence gathered.
+
+    Conflict detection compares the values *one claim* cites, so the default
+    draft — which cites only the first — can never surface a disagreement no
+    matter how badly two sources contradict each other. Being explicit about
+    that is the difference between testing the detector and testing the
+    fixture.
+    """
+    return SynthesisDraft(
+        summary=[
+            DraftClaim(
+                text="Acme reported revenue for FY2025.",
+                claim_type=ClaimType.FACT,
+                evidence_ids=[str(identifier) for identifier in evidence_ids],
+                is_important=True,
+            )
+        ],
+        sections=[],
+    )

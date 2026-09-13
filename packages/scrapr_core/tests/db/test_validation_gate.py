@@ -16,6 +16,7 @@ import datetime as dt
 from uuid import UUID
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from scrapr_core.db.enums import (
@@ -34,6 +35,7 @@ from scrapr_core.db.models import (
     ClaimEvidence,
     Evidence,
     QuestionState,
+    ReportSection,
     ResearchQuestion,
     ResearchSession,
     ResearchVersion,
@@ -97,6 +99,33 @@ def add_evidence(
     return evidence
 
 
+def add_section(db_session: Session, version_id: UUID) -> ReportSection:
+    """A section for claims to live in.
+
+    `REQ-SYNTH-006 AC-3` makes a sectionless claim a gate violation in its own
+    right — it is a statement that exists in the data and renders nowhere — so
+    a fixture testing some *other* rule has to place its claims somewhere, or
+    every assertion in this file trips over that one instead.
+    """
+    # One per version, reused: sections are unique on (version_id, ordering),
+    # and a fixture adding three claims must not try to create three of them.
+    existing = db_session.execute(
+        select(ReportSection).where(ReportSection.version_id == version_id)
+    ).scalars().first()
+    if existing is not None:
+        return existing
+
+    section = ReportSection(
+        version_id=version_id,
+        title="Findings",
+        body={"blocks": [{"kind": "claims"}]},
+        ordering=0,
+    )
+    db_session.add(section)
+    db_session.flush()
+    return section
+
+
 def add_claim(
     db_session: Session,
     version_id: UUID,
@@ -105,9 +134,18 @@ def add_claim(
     evidence: Evidence | None = None,
     role: EvidenceRole = EvidenceRole.SUPPORTING,
     assumptions: dict[str, str] | None = None,
+    section: ReportSection | None = None,
+    orphaned: bool = False,
 ) -> Claim:
+    """One claim, in a section unless the test is about not having one."""
+    placement = (
+        None
+        if orphaned
+        else (section or add_section(db_session, version_id)).id
+    )
     claim = Claim(
         version_id=version_id,
+        section_id=placement,
         text="Acme reported $1.2bn revenue for FY2025.",
         claim_type=claim_type,
         assumptions=assumptions,
@@ -378,3 +416,89 @@ def test_each_missing_gap_is_reported_separately(
     report = validate_version(db_session, version_id)
 
     assert len(report.violations) == 2
+
+
+# --------------------------------------------------------------------------
+# Phase 2 rules
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("You should buy this stock before earnings.", id="you-should-buy"),
+        pytest.param("We recommend selling ahead of Q4.", id="we-recommend-selling"),
+        pytest.param("Acme is a buy at current levels.", id="is-a-buy"),
+        pytest.param("Analysts assigned a strong buy rating.", id="rating"),
+        pytest.param("I would hold through the announcement.", id="i-would-hold"),
+    ],
+)
+def test_a_personalized_recommendation_is_rejected(
+    db_session: Session, version_id: UUID, text: str
+) -> None:
+    """`REQ-SYNTH-008 AC-1`, enforced by the gate rather than asked of a model.
+
+    This is the one requirement in the file whose breach is a regulatory
+    problem rather than a quality problem, so "we told the model not to" is not
+    a control — a jailbreak through retrieved content, or a merely careless
+    phrasing, has to be caught after generation.
+    """
+    evidence = add_evidence(db_session, version_id)
+    claim = add_claim(db_session, version_id, ClaimType.FACT, evidence=evidence)
+    claim.text = text
+    db_session.flush()
+
+    report = validate_version(db_session, version_id)
+
+    assert not report.passed
+    assert any(v.rule == "REQ-SYNTH-008" for v in report.violations), report.summary()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("Acme is a holding company with 40,000 shareholders.", id="holding-co"),
+        pytest.param("Acme sells software to enterprise customers.", id="sells"),
+        pytest.param("Margins deteriorated and the downside risk is material.", id="risk"),
+        pytest.param("Sell-side analysts expect revenue growth of 18%.", id="sell-side"),
+        pytest.param("Shareholders hold 60% of the float.", id="shareholders-hold"),
+    ],
+)
+def test_ordinary_financial_prose_is_not_rejected(
+    db_session: Session, version_id: UUID, text: str
+) -> None:
+    """The other half, and the half that decides whether the rule survives.
+
+    `REQ-SYNTH-007` requires assessments that state risks and interpret
+    evidence, so a gate firing on "risk" or "sells" would make the product
+    unable to satisfy one requirement without breaching another — and would be
+    switched off within a week, which is how a safety control actually dies.
+    """
+    evidence = add_evidence(db_session, version_id)
+    claim = add_claim(db_session, version_id, ClaimType.FACT, evidence=evidence)
+    claim.text = text
+    db_session.flush()
+
+    report = validate_version(db_session, version_id)
+
+    assert not any(v.rule == "REQ-SYNTH-008" for v in report.violations), text
+
+
+def test_a_claim_in_no_section_is_rejected(
+    db_session: Session, version_id: UUID
+) -> None:
+    """`REQ-SYNTH-006 AC-3`: an unmapped important statement is a generation
+    defect and must not ship silently.
+
+    Sections render their claims rather than carrying prose of their own, so
+    the mapping holds by construction and survives regeneration (`AC-2`). What
+    construction cannot guarantee is that a claim reached a section at all — a
+    statement that exists in the data and appears on no page.
+    """
+    evidence = add_evidence(db_session, version_id)
+    add_claim(db_session, version_id, ClaimType.FACT, evidence=evidence, orphaned=True)
+
+    report = validate_version(db_session, version_id)
+
+    assert not report.passed
+    assert any(v.rule == "REQ-SYNTH-006" for v in report.violations), report.summary()

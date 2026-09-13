@@ -14,9 +14,23 @@ only the rules whose requirements exist by Phase 1:
 * every question the research did not answer is stated as an uncertainty
   (`REQ-SYNTH-010`, `DEC-04 §6.3`)
 
-Conflict, confidence and visualization rules switch on in Phases 2 and 3 with
-the requirements that define them; each arrives here as another `Rule`, and the
-list is the gate's whole definition.
+Phase 2 adds two more:
+
+* no output recommends buying, selling or holding a security
+  (`REQ-SYNTH-008 AC-1`)
+* every important statement resolves to a claim in a section
+  (`REQ-SYNTH-006 AC-1`, `AC-3`)
+
+The investment-advice rule belongs here rather than in a prompt for the same
+reason as every other rule in this file. `REQ-SYNTH-008` is the one requirement
+whose breach is a regulatory problem rather than a quality problem, and
+"we told the model not to" is not a control. A model that drifts, is
+jailbroken by retrieved content, or simply phrases an assessment carelessly
+gets caught by the gate instead of by a user.
+
+Visualization rules switch on in Phase 3 with the requirements that define
+them; each arrives here as another check, and the list is the gate's whole
+definition.
 
 A failure is a generation defect, not a user error. The caller retries synthesis
 once and then completes the version as `partial` with the defect recorded — it
@@ -25,6 +39,7 @@ never ships silently.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import final
@@ -100,8 +115,89 @@ def validate_version(session: Session, version_id: UUID) -> ValidationReport:
         violations.extend(_check_claim(session, claim))
 
     violations.extend(_check_gaps_are_stated(session, version_id, claims))
+    violations.extend(_check_no_investment_advice(claims))
+    violations.extend(_check_statements_map_to_sections(claims))
 
     return ValidationReport(version_id=version_id, violations=tuple(violations))
+
+
+# `REQ-SYNTH-008 AC-1`: no output instructs the user to buy, sell or hold.
+#
+# Matched as whole phrases against the claim text. A word list would be worse
+# than useless here -- "hold" appears in "holding company" and "shareholders
+# hold", "sell" in "sell-side" and "sells software" -- and a gate that fires on
+# ordinary financial prose would be switched off within a week, which is the
+# real way a safety control dies.
+#
+# Scoped to the imperative and advisory forms an instruction actually takes.
+# Analysis is explicitly allowed: `AC-2` requires assessments be framed with
+# confidence, risks and assumptions, and `REQ-SYNTH-007` requires them to
+# exist. This rule stops a recommendation, not a judgement.
+_ADVICE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\byou should (buy|sell|hold|short|divest|invest)\b", re.I),
+    re.compile(r"\bwe recommend (buying|selling|holding|shorting)\b", re.I),
+    re.compile(r"\b(i|we) would (buy|sell|hold|short)\b", re.I),
+    re.compile(r"\b(buy|sell|hold|strong buy|strong sell) rating\b", re.I),
+    re.compile(r"\bis a (buy|sell|hold)\b", re.I),
+    re.compile(r"\brecommend(ed|ation)? to (buy|sell|hold)\b", re.I),
+    re.compile(r"\b(add|allocate) (this|it) to your portfolio\b", re.I),
+    re.compile(r"\byou should (not )?(own|purchase|acquire) (this|these) (share|stock)", re.I),
+)
+
+
+def _check_no_investment_advice(claims: Sequence[Claim]) -> Sequence[GateViolation]:
+    """Reject a version that tells the reader what to do with a security.
+
+    `REQ-SYNTH-008` draws the line at *personalized* recommendation: the
+    product may say a company's margins are deteriorating and that the risk is
+    material, and may not say to sell. The difference is whether the output
+    addresses the reader's position, and the patterns above are the forms that
+    does take.
+    """
+    violations: list[GateViolation] = []
+    for claim in claims:
+        for pattern in _ADVICE_PATTERNS:
+            found = pattern.search(claim.text)
+            if found is None:
+                continue
+            violations.append(
+                GateViolation(
+                    rule="REQ-SYNTH-008",
+                    claim_id=claim.id,
+                    detail=(
+                        "a claim reads as a personalized investment "
+                        f"recommendation: {found.group(0)!r}"
+                    ),
+                )
+            )
+            break
+    return tuple(violations)
+
+
+def _check_statements_map_to_sections(
+    claims: Sequence[Claim],
+) -> Sequence[GateViolation]:
+    """Every important statement resolves to a claim in a section.
+
+    `REQ-SYNTH-006 AC-1` asks that rendered text map to claim records, and the
+    report is built so that it does by construction: sections render their
+    claims rather than carrying prose of their own, so the mapping survives
+    regeneration (`AC-2`) because there is no second copy of the text to drift.
+
+    What that construction cannot guarantee is that every claim reached a
+    section. A claim with no `section_id` was written and is rendered nowhere —
+    an important statement that exists in the data and not on the page, which
+    is exactly the unmapped case `AC-3` says must not ship silently.
+    """
+    return tuple(
+        GateViolation(
+            rule="REQ-SYNTH-006",
+            claim_id=claim.id,
+            detail=f"claim belongs to no section and would render nowhere: {claim.text[:60]!r}",
+        )
+        for claim in claims
+        if claim.section_id is None
+    )
 
 
 def _check_gaps_are_stated(

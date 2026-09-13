@@ -466,3 +466,68 @@ def test_research_is_queued_durably_before_the_response_returns(
     assert [step.stage for step in steps] == list(STAGES)
     assert all(step.status is StepStatus.PENDING for step in steps)
     assert all(step.lease_owner is None for step in steps)
+
+
+# --------------------------------------------------------------------------
+# Phase 2 on the wire
+# --------------------------------------------------------------------------
+
+
+async def test_the_payload_carries_confidence_and_its_reasoning(
+    client: TestClient,
+    registry: ToolRegistry,
+    provider: FakeLLMProvider,
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-EVID-015 AC-1` needs confidence displayed where the claim appears,
+    which it cannot be if it never leaves the server. `REQ-DATA-012` needs the
+    reasoning to travel with it."""
+    created = start(client)
+
+    await run_pipeline(session_factory, registry, provider)
+
+    body = client.get(f"/v1/research/{created['session_id']}/versions/1").json()
+
+    assert body["claims"]
+    for claim in body["claims"]:
+        assert claim["confidence"] in {"high", "moderate", "low"}
+        assert claim["confidence_rationale"]
+
+
+async def test_a_conflict_reaches_the_client_with_both_sides(
+    client: TestClient,
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-WORK-009 AC-1`, and the reason this test exists at all.
+
+    Conflict detection has been correct and unreachable before — the detector
+    ran only when a fixture contradicted itself, which none did by default. The
+    same trap applies one layer up: the rows can be written perfectly and never
+    serialised, and the UI would render nothing while every backend test
+    passed.
+    """
+    from pipeline_support import cite_everything, disputed_registry, disputing_provider
+
+    created = start(client)
+
+    await run_pipeline(
+        session_factory,
+        disputed_registry(),
+        disputing_provider(),
+        synthesis=cite_everything,
+    )
+
+    body = client.get(f"/v1/research/{created['session_id']}/versions/1").json()
+
+    assert body["conflicts"], "a detected conflict never reached the wire"
+
+    conflict = body["conflicts"][0]
+    assert len(conflict["sides"]) == 2, "both values must travel (`AC-1`)"
+    assert conflict["status"] in {"explained", "unresolved"}
+
+    # `REQ-EVID-012 AC-3`: each side resolves to a source the client already
+    # has, so it can show the tier and retrieval time beside the value.
+    known = {source["id"] for source in body["sources"]}
+    for side in conflict["sides"]:
+        assert side["source_id"] in known
+        assert side["value"]

@@ -22,6 +22,8 @@ from scrapr_core.db.enums import (
     ActivityStatus,
     AuthorityTier,
     ClaimType,
+    ConflictCause,
+    ConflictStatus,
     ResearchStatus,
     VersionStatus,
 )
@@ -102,6 +104,38 @@ class SourceOut(BaseModel):
     published_at: dt.datetime | None
 
 
+class ConflictSideOut(BaseModel):
+    """One value in a disagreement, with what a reader needs to judge it.
+
+    `REQ-EVID-012 AC-3` names the three: the source, its tier, and when it was
+    read. Showing the values without them would present a disagreement the
+    reader has no way to weigh.
+    """
+
+    evidence_id: UUID
+    source_id: UUID
+    label: str | None
+    value: str
+    """Exactly as reported (`REQ-EVID-008 AC-2`), never the normalised form."""
+
+
+class ConflictOut(BaseModel):
+    """Evidence that disagrees, surfaced rather than resolved away.
+
+    `REQ-WORK-009`: conflicts are a visible feature of the report, not hidden.
+    `explanation` is null when nothing in the evidence accounts for the gap,
+    and `status` then reads `unresolved` — `REQ-EVID-013 AC-3` forbids
+    inventing a cause, and `REQ-EVID-014` requires saying so plainly.
+    """
+
+    id: UUID
+    claim_id: UUID
+    status: ConflictStatus
+    explanation: str | None
+    explanation_category: ConflictCause | None
+    sides: list[ConflictSideOut]
+
+
 class ClaimOut(BaseModel):
     """One assertion, typed, with the sources behind it (`REQ-SYNTH-002..003`)."""
 
@@ -109,7 +143,12 @@ class ClaimOut(BaseModel):
     text: str
     claim_type: ClaimType
     confidence: str | None
-    """Null until Phase 2; the scale itself is `OPEN-14`."""
+    """`REQ-EVID-015`: every claim carries one. Null only on a version written
+    before Phase 2, which the client renders as absent rather than inventing a
+    level for research nobody assessed."""
+    confidence_rationale: str | None
+    """Why it got that level (`REQ-DATA-012`). Generated from the same inputs
+    as the level itself, so it cannot drift from what it explains."""
     is_important: bool
     source_ids: list[UUID]
 
@@ -136,6 +175,7 @@ class VersionOut(BaseModel):
     sections: list[SectionOut]
     claims: list[ClaimOut]
     sources: list[SourceOut]
+    conflicts: list[ConflictOut]
 
 
 class ActivityEventOut(BaseModel):

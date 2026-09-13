@@ -169,6 +169,8 @@ export interface components {
             claim_type: components["schemas"]["ClaimType"];
             /** Confidence */
             confidence: string | null;
+            /** Confidence Rationale */
+            confidence_rationale: string | null;
             /**
              * Id
              * Format: uuid
@@ -191,6 +193,69 @@ export interface components {
          * @enum {string}
          */
         ClaimType: "fact" | "analysis" | "forecast" | "uncertainty";
+        /**
+         * ConflictCause
+         * @description Why two pieces of evidence disagree (`REQ-EVID-013 AC-1`).
+         * @enum {string}
+         */
+        ConflictCause: "period" | "definition" | "currency" | "estimate_vs_reported" | "methodology" | "staleness";
+        /**
+         * ConflictOut
+         * @description Evidence that disagrees, surfaced rather than resolved away.
+         *
+         *     `REQ-WORK-009`: conflicts are a visible feature of the report, not hidden.
+         *     `explanation` is null when nothing in the evidence accounts for the gap,
+         *     and `status` then reads `unresolved` — `REQ-EVID-013 AC-3` forbids
+         *     inventing a cause, and `REQ-EVID-014` requires saying so plainly.
+         */
+        ConflictOut: {
+            /**
+             * Claim Id
+             * Format: uuid
+             */
+            claim_id: string;
+            /** Explanation */
+            explanation: string | null;
+            explanation_category: components["schemas"]["ConflictCause"] | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sides */
+            sides: components["schemas"]["ConflictSideOut"][];
+            status: components["schemas"]["ConflictStatus"];
+        };
+        /**
+         * ConflictSideOut
+         * @description One value in a disagreement, with what a reader needs to judge it.
+         *
+         *     `REQ-EVID-012 AC-3` names the three: the source, its tier, and when it was
+         *     read. Showing the values without them would present a disagreement the
+         *     reader has no way to weigh.
+         */
+        ConflictSideOut: {
+            /**
+             * Evidence Id
+             * Format: uuid
+             */
+            evidence_id: string;
+            /** Label */
+            label: string | null;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Value */
+            value: string;
+        };
+        /**
+         * ConflictStatus
+         * @description Whether a conflict was explained or is surfaced unresolved (`REQ-EVID-014`).
+         * @enum {string}
+         */
+        ConflictStatus: "explained" | "unresolved";
         /**
          * CreateResearchRequest
          * @description `REQ-INPUT-001..005`. Only the objective is required.
@@ -337,6 +402,8 @@ export interface components {
             claims: components["schemas"]["ClaimOut"][];
             /** Closed At */
             closed_at: string | null;
+            /** Conflicts */
+            conflicts: components["schemas"]["ConflictOut"][];
             /**
              * Created At
              * Format: date-time

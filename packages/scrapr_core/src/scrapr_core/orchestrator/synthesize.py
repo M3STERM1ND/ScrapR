@@ -20,6 +20,17 @@ Four rules are imposed here rather than asked of the model:
 Sections carry an explicit persisted order (`REQ-SYNTH-005`), and the executive
 summary is section zero: `REQ-SYNTH-003` requires the report to open with it,
 and ordering is what makes that survive a reload and an export.
+
+**Two Phase 2 rules are asked of the model here and enforced by the gate.**
+`REQ-SYNTH-007` wants financial assessments structured evidence → interpretation
+→ assessment → risks → uncertainty, with the evidence *against* the conclusion
+shown rather than omitted (`AC-3`). `REQ-SYNTH-008` forbids telling a reader to
+buy, sell or hold.
+
+Asking is not the control. The instruction below improves the odds; the gate in
+`synthesis/validation.py` is what makes `REQ-SYNTH-008` hold, because a
+requirement whose breach is a regulatory problem cannot rest on prompt wording
+that a jailbreak or a careless phrasing can slip past.
 """
 
 from __future__ import annotations
@@ -62,7 +73,16 @@ INSTRUCTION = Trusted(
     "cannot cite is analysis at best, and if you cannot support it at all, do "
     "not write it.\n\n"
     "Where the evidence does not answer something, say so plainly. Never fill a "
-    "gap with speculation and never present speculation as analysis."
+    "gap with speculation and never present speculation as analysis.\n\n"
+    "If the objective concerns financial performance or a stock, structure that "
+    "part as evidence, then interpretation, then assessment, then risks, then "
+    "what remains uncertain. State the factors supporting the assessment and "
+    "the evidence against it; an assessment that omits what contradicts it is "
+    "not an assessment.\n\n"
+    "Never tell the reader to buy, sell or hold anything, and never write a "
+    "rating. You are describing what the evidence shows, not advising a "
+    "position. A reader asking what to do gets analysis, risks and assumptions "
+    "so they can decide."
 )
 
 

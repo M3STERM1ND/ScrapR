@@ -101,6 +101,17 @@
             ],
             "title": "Confidence"
           },
+          "confidence_rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence Rationale"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -128,6 +139,7 @@
           "text",
           "claim_type",
           "confidence",
+          "confidence_rationale",
           "is_important",
           "source_ids"
         ],
@@ -143,6 +155,122 @@
           "uncertainty"
         ],
         "title": "ClaimType",
+        "type": "string"
+      },
+      "ConflictCause": {
+        "description": "Why two pieces of evidence disagree (`REQ-EVID-013 AC-1`).",
+        "enum": [
+          "period",
+          "definition",
+          "currency",
+          "estimate_vs_reported",
+          "methodology",
+          "staleness"
+        ],
+        "title": "ConflictCause",
+        "type": "string"
+      },
+      "ConflictOut": {
+        "description": "Evidence that disagrees, surfaced rather than resolved away.\n\n`REQ-WORK-009`: conflicts are a visible feature of the report, not hidden.\n`explanation` is null when nothing in the evidence accounts for the gap,\nand `status` then reads `unresolved` \u2014 `REQ-EVID-013 AC-3` forbids\ninventing a cause, and `REQ-EVID-014` requires saying so plainly.",
+        "properties": {
+          "claim_id": {
+            "format": "uuid",
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "explanation_category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConflictCause"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "sides": {
+            "items": {
+              "$ref": "#/components/schemas/ConflictSideOut"
+            },
+            "title": "Sides",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConflictStatus"
+          }
+        },
+        "required": [
+          "id",
+          "claim_id",
+          "status",
+          "explanation",
+          "explanation_category",
+          "sides"
+        ],
+        "title": "ConflictOut",
+        "type": "object"
+      },
+      "ConflictSideOut": {
+        "description": "One value in a disagreement, with what a reader needs to judge it.\n\n`REQ-EVID-012 AC-3` names the three: the source, its tier, and when it was\nread. Showing the values without them would present a disagreement the\nreader has no way to weigh.",
+        "properties": {
+          "evidence_id": {
+            "format": "uuid",
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "source_id",
+          "label",
+          "value"
+        ],
+        "title": "ConflictSideOut",
+        "type": "object"
+      },
+      "ConflictStatus": {
+        "description": "Whether a conflict was explained or is surfaced unresolved (`REQ-EVID-014`).",
+        "enum": [
+          "explained",
+          "unresolved"
+        ],
+        "title": "ConflictStatus",
         "type": "string"
       },
       "CreateResearchRequest": {
@@ -509,6 +637,13 @@
             ],
             "title": "Closed At"
           },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/ConflictOut"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -555,7 +690,8 @@
           "closed_at",
           "sections",
           "claims",
-          "sources"
+          "sources",
+          "conflicts"
         ],
         "title": "VersionOut",
         "type": "object"

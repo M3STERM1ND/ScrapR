@@ -1,4 +1,4 @@
-import type { Claim, Source, Version } from "@/lib/api/client";
+import type { Claim, Conflict, Source, Version } from "@/lib/api/client";
 
 /**
  * A version, rendered (`REQ-WORK-003..005`).
@@ -14,11 +14,18 @@ import type { Claim, Source, Version } from "@/lib/api/client";
  * this is where a reader gets to check it — so citations are part of the claim,
  * not a footnote somewhere else.
  *
- * Phase 2 adds two more things a reader is entitled to see. **Confidence** sits
- * beside every claim (`REQ-EVID-015 AC-1`), on three non-colour channels: the
- * word, filled and hollow marks, and weight. **Source tier** sits beside every
- * citation (`REQ-EVID-003 AC-2`), because a claim rated moderate should let the
- * reader see *why* rather than asking them to trust the rating.
+ * Phase 2 adds three more things a reader is entitled to see. **Confidence**
+ * sits beside every claim (`REQ-EVID-015 AC-1`), on three non-colour channels:
+ * the word, filled and hollow marks, and weight. **Source tier** sits beside
+ * every citation (`REQ-EVID-003 AC-2`), because a claim rated moderate should
+ * let the reader see *why* rather than asking them to trust the rating.
+ *
+ * And **conflicts are shown, not hidden** (`REQ-WORK-009`). Both values appear
+ * with their source, the explanation appears where one exists, and where none
+ * does the disagreement is labelled unresolved rather than quietly resolved in
+ * favour of whichever value the model happened to write down. That is the
+ * whole reason `REQ-EVID-014` exists: the honest output when two credible
+ * sources disagree is to say so.
  */
 
 type Props = {
@@ -67,6 +74,18 @@ const TIER_WORD: Record<string, string> = {
   lower: "Unverified source",
 };
 
+/* `REQ-EVID-013 AC-1`'s causes, in words that mean something to a reader.
+   "estimate_vs_reported" is a database value; "one figure is an estimate" is
+   an explanation. */
+const CAUSE_WORD: Record<string, string> = {
+  period: "the figures cover different reporting periods",
+  definition: "the sources are measuring different things",
+  currency: "the figures are in different currencies",
+  estimate_vs_reported: "one figure is an estimate and the other is reported",
+  methodology: "the sources used different methods",
+  staleness: "one figure is significantly older than the other",
+};
+
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString(undefined, {
     year: "numeric",
@@ -80,6 +99,15 @@ export function ReportView({ version }: Props) {
   const sourcesById = new Map(
     version.sources.map((source) => [source.id, source]),
   );
+
+  // Conflicts are addressed to a claim, so they are grouped once here rather
+  // than scanned per claim while rendering.
+  const conflictsByClaim = new Map<string, Conflict[]>();
+  for (const conflict of version.conflicts) {
+    const found = conflictsByClaim.get(conflict.claim_id) ?? [];
+    found.push(conflict);
+    conflictsByClaim.set(conflict.claim_id, found);
+  }
 
   if (version.sections.length === 0) {
     return (
@@ -113,6 +141,8 @@ export function ReportView({ version }: Props) {
                 <ClaimBlock
                   key={claim.id}
                   claim={claim}
+                  conflicts={conflictsByClaim.get(claim.id) ?? []}
+                  sourcesById={sourcesById}
                   sources={claim.source_ids
                     .map((id) => sourcesById.get(id))
                     .filter((source): source is Source => Boolean(source))}
@@ -126,7 +156,17 @@ export function ReportView({ version }: Props) {
   );
 }
 
-function ClaimBlock({ claim, sources }: { claim: Claim; sources: Source[] }) {
+function ClaimBlock({
+  claim,
+  sources,
+  conflicts,
+  sourcesById,
+}: {
+  claim: Claim;
+  sources: Source[];
+  conflicts: Conflict[];
+  sourcesById: Map<string, Source>;
+}) {
   return (
     <div className={`claim ${CLAIM_CLASS[claim.claim_type]}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -134,6 +174,14 @@ function ClaimBlock({ claim, sources }: { claim: Claim; sources: Source[] }) {
         <ConfidenceTag confidence={claim.confidence} />
       </div>
       <p className="measure mt-2 text-body">{claim.text}</p>
+
+      {conflicts.map((conflict) => (
+        <ConflictBlock
+          key={conflict.id}
+          conflict={conflict}
+          sourcesById={sourcesById}
+        />
+      ))}
 
       {sources.length > 0 ? (
         <ul className="mt-4 flex flex-col gap-2">
@@ -144,6 +192,79 @@ function ClaimBlock({ claim, sources }: { claim: Claim; sources: Source[] }) {
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A disagreement, shown (`REQ-WORK-009`, `REQ-EVID-012 AC-3`).
+ *
+ * Both values, each with its source and tier, so a reader can weigh them
+ * rather than being handed a verdict. The explanation appears when the
+ * evidence supports one (`REQ-EVID-013 AC-2`); when it does not, the block
+ * says "unresolved" in as many words (`REQ-EVID-014 AC-1`) instead of
+ * inventing a reason.
+ */
+function ConflictBlock({
+  conflict,
+  sourcesById,
+}: {
+  conflict: Conflict;
+  sourcesById: Map<string, Source>;
+}) {
+  const unresolved = conflict.status === "unresolved";
+  const cause = conflict.explanation_category
+    ? CAUSE_WORD[conflict.explanation_category]
+    : null;
+
+  return (
+    <div className="conflict mt-4">
+      <p className="conflict-label">
+        {unresolved ? "Sources disagree — unresolved" : "Sources disagree"}
+      </p>
+
+      <ul className="mt-2 flex flex-col gap-2">
+        {conflict.sides.map((side) => {
+          const source = sourcesById.get(side.source_id);
+          return (
+            <li key={side.evidence_id} className="text-micro text-ink-muted">
+              <span className="tnum text-ink">{side.value}</span>
+              {source ? (
+                <>
+                  {" — "}
+                  {source.url ? (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-ochre-deep underline decoration-line-strong underline-offset-4"
+                    >
+                      {source.name}
+                    </a>
+                  ) : (
+                    <span>{source.name}</span>
+                  )}{" "}
+                  <span className="tier-tag">
+                    {TIER_WORD[source.authority_tier] ?? source.authority_tier}
+                  </span>{" "}
+                  <span className="tnum">Read {formatDate(source.retrieved_at)}</span>
+                </>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+
+      {cause ? (
+        <p className="mt-2 text-micro text-ink-soft">Likely because {cause}.</p>
+      ) : (
+        /* `REQ-EVID-013 AC-3`: explanations are never invented, so the honest
+           output here is to say nothing accounts for the gap. */
+        <p className="mt-2 text-micro text-ink-soft">
+          Nothing in the evidence explains the difference, so neither figure is
+          presented as settled.
+        </p>
+      )}
     </div>
   );
 }

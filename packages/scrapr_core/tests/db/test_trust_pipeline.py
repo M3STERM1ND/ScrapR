@@ -15,11 +15,14 @@ reader could actually be shown.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from uuid import UUID
 
 import pytest
 from pipeline_support import (
+    cite_everything,
+    disputed_registry,
+    disputing_provider,
     fixture_registry,
     run_pipeline,
     scripted_provider,
@@ -42,11 +45,7 @@ from scrapr_core.db.repositories import (
 )
 from scrapr_core.domain.ownership import OwnerContext
 from scrapr_core.llm import FakeLLMProvider
-from scrapr_core.orchestrator.extract import ExtractedEvidence, Extraction
-from scrapr_core.orchestrator.interpret import Interpretation
 from scrapr_core.orchestrator.pipeline import STAGES
-from scrapr_core.orchestrator.plan import _PlanDraft
-from scrapr_core.orchestrator.synthesize import DraftClaim, SynthesisDraft
 from scrapr_core.tools import ToolCategory, ToolRegistry
 
 pytestmark = pytest.mark.integration
@@ -86,82 +85,6 @@ def start_research(session_factory: sessionmaker[Session], url: str | None = Non
 
 def provider() -> FakeLLMProvider:
     return scripted_provider("Acme Corp", (QUESTION,), AREAS)
-
-
-# Two sources, same metric, same period, same currency, 58% apart.
-DISPUTED = (
-    "Acme Corp reported revenue of USD 1.2bn for fiscal 2025.",
-    "Acme Corp reported revenue of USD 1.9bn for fiscal 2025.",
-)
-
-
-def disputed_registry() -> ToolRegistry:
-    registry = ToolRegistry()
-    registry.register(search_tool(texts=DISPUTED, host="reuters.com"))
-    registry.freeze()
-    return registry
-
-
-def disputing_provider() -> FakeLLMProvider:
-    """A provider that extracts both figures rather than the suite's default.
-
-    `scripted_provider` carries a fixed standing extraction, so whatever a
-    fixture publishes, the evidence written is the same two sentences — and the
-    grounding check would drop anything else. Conflict detection compares the
-    numbers *in the evidence*, so testing it needs extraction that actually
-    reads the disputed figures.
-    """
-    provider = FakeLLMProvider(
-        standing_response=Extraction(
-            evidence=[
-                ExtractedEvidence(
-                    statement=DISPUTED[0],
-                    excerpt="revenue of USD 1.2bn",
-                    item_index=0,
-                ),
-                ExtractedEvidence(
-                    statement=DISPUTED[1],
-                    excerpt="revenue of USD 1.9bn",
-                    item_index=1,
-                ),
-            ]
-        )
-    )
-    provider.enqueue(
-        Interpretation(subject="Acme Corp", interpretation_note=None, questions=[QUESTION]),
-        _PlanDraft(
-            areas=[
-                _PlanDraft.Area(
-                    name="Financial performance",
-                    questions=[QUESTION],
-                    tool_categories=["web_search"],
-                )
-            ]
-        ),
-    )
-    return provider
-
-
-def _cite_everything(evidence_ids: Sequence[UUID]) -> SynthesisDraft:
-    """A report whose single fact cites every piece of evidence gathered.
-
-    Conflict detection compares the values *one claim* cites, so a draft citing
-    only the first — which the default does — can never surface a
-    disagreement no matter how badly two sources contradict each other. Making
-    that explicit here is the difference between testing the detector and
-    testing the fixture.
-    """
-    return SynthesisDraft(
-        summary=[
-            DraftClaim(
-                text="Acme reported revenue for FY2025.",
-                claim_type=ClaimType.FACT,
-                evidence_ids=[str(identifier) for identifier in evidence_ids],
-                is_important=True,
-            )
-        ],
-        sections=[],
-    )
 
 
 # --------------------------------------------------------------------------
@@ -405,7 +328,7 @@ async def test_two_sources_that_disagree_produce_a_conflict(
         session_factory,
         disputed_registry(),
         disputing_provider(),
-        synthesis=_cite_everything,
+        synthesis=cite_everything,
     )
 
     with session_factory() as session:
@@ -426,7 +349,7 @@ async def test_competing_evidence_is_preserved_not_discarded(
         session_factory,
         disputed_registry(),
         disputing_provider(),
-        synthesis=_cite_everything,
+        synthesis=cite_everything,
     )
 
     with session_factory() as session:
@@ -465,7 +388,7 @@ async def test_an_unexplained_conflict_is_stored_as_unresolved(
         session_factory,
         disputed_registry(),
         disputing_provider(),
-        synthesis=_cite_everything,
+        synthesis=cite_everything,
     )
 
     with session_factory() as session:
@@ -490,7 +413,7 @@ async def test_a_contested_claim_is_not_high_confidence(
         session_factory,
         disputed_registry(),
         disputing_provider(),
-        synthesis=_cite_everything,
+        synthesis=cite_everything,
     )
 
     with session_factory() as session:

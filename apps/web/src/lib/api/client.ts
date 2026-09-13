@@ -28,6 +28,8 @@ export type Version = Schemas["VersionOut"];
 export type Claim = Schemas["ClaimOut"];
 export type Section = Schemas["SectionOut"];
 export type Source = Schemas["SourceOut"];
+export type Conflict = Schemas["ConflictOut"];
+export type ConflictSide = Schemas["ConflictSideOut"];
 export type ActivityEvent = Schemas["ActivityEventOut"];
 export type ActivityPage = Schemas["ActivityPage"];
 

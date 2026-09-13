@@ -30,7 +30,8 @@ than half-written first.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import final
 from uuid import UUID
@@ -60,8 +61,21 @@ class RetrievalCache:
     empty cache rather than to remember to bypass a shared one.
     """
 
-    def __init__(self) -> None:
-        self._entries: dict[tuple[str, str, str], ToolOutcome] = {}
+    def __init__(
+        self,
+        *,
+        ttl_seconds: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        """`ttl_seconds` bounds reuse within the run (`REQ-TOOL-013 AC-4`).
+
+        `None` keeps an entry for the life of the run. The lifetime never
+        exceeds one run whatever it is set to (`DEC-19`), because the cache is
+        an object a run creates rather than something runs share.
+        """
+        self._entries: dict[tuple[str, str, str], tuple[float, ToolOutcome]] = {}
+        self._ttl = ttl_seconds
+        self._clock = clock
         self.hits = 0
 
     @staticmethod
@@ -72,9 +86,16 @@ class RetrievalCache:
         return (request.category.value, request.tool, params)
 
     def get(self, request: ToolRequest) -> ToolOutcome | None:
-        outcome = self._entries.get(self._key(request))
-        if outcome is not None:
-            self.hits += 1
+        key = self._key(request)
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        stored_at, outcome = entry
+        if self._ttl is not None and self._clock() - stored_at > self._ttl:
+            # Expired: dropped, so the next ask retrieves afresh.
+            del self._entries[key]
+            return None
+        self.hits += 1
         return outcome
 
     def put(self, request: ToolRequest, outcome: ToolOutcome) -> None:
@@ -84,7 +105,7 @@ class RetrievalCache:
         it would turn one bad moment into a run-long outage for that query.
         """
         if isinstance(outcome, ToolResult):
-            self._entries[self._key(request)] = outcome
+            self._entries[self._key(request)] = (self._clock(), outcome)
 
 
 @final

@@ -45,6 +45,7 @@ PROBES: dict[tuple[str, str], Probe] = {
     ("GET", "/v1/research/{session_id}"): Probe(),
     ("DELETE", "/v1/research/{session_id}"): Probe(ok_statuses=frozenset({204})),
     ("POST", "/v1/research/{session_id}/start"): Probe(),
+    ("POST", "/v1/research/{session_id}/update"): Probe(),
     ("GET", "/v1/research/{session_id}/versions/{version_number}"): Probe(),
     ("GET", "/v1/research/{session_id}/activity"): Probe(),
     ("GET", "/v1/research/{session_id}/messages"): Probe(),

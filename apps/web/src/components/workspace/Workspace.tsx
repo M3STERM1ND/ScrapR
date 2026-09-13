@@ -6,50 +6,58 @@ import { useEffect, useRef, useState } from "react";
 
 import { DeleteResearch } from "@/components/account/DeleteResearch";
 import { ActivityTimeline } from "@/components/activity/ActivityTimeline";
-import { useAccount } from "@/lib/useAccount";
-import { AttachedDocuments } from "./AttachedDocuments";
 import { ConversationPanel } from "@/components/conversation/ConversationPanel";
 import { ReportView } from "@/components/report/ReportView";
+import { VersionNav } from "@/components/versions/VersionNav";
+import { WhatsChanged } from "@/components/versions/WhatsChanged";
 import {
   ApiError,
   getActivity,
-  listUploads,
-  getResearch,
   getMessages,
+  getResearch,
   getVersion,
+  listUploads,
+  updateResearch,
   type ActivityEvent,
-  type Upload,
   type Message,
   type ResearchSession,
   type Source,
+  type Upload,
   type Version,
+  type VersionListing,
 } from "@/lib/api/client";
+import { useAccount } from "@/lib/useAccount";
+import { AttachedDocuments } from "./AttachedDocuments";
 
 /**
- * The workspace (`REQ-WORK-002..005`).
+ * The workspace (`REQ-WORK-002..005`), for the latest version or a chosen one
+ * (`REQ-VER-008`).
  *
  * **Polling, not streaming.** `GET /activity?after={seq}` returns events newer
  * than a sequence number and says what to ask for next. The Phase 3 upgrade to
  * SSE reuses that exact resume key, so this component's state model does not
  * change when the transport does (implementation plan §6.3).
  *
- * **Polling stops when the run does.** A tab left open on finished research
- * should cost nothing, so the interval clears the moment the session reaches a
- * terminal status — and again whenever the tab is hidden.
+ * **Polling stops when the run does**, and starts again when the reader presses
+ * Update Research. A tab left open on finished research should cost nothing.
+ *
+ * **The report on screen is always a finished version.** While an update runs,
+ * the previous version stays in place and the activity timeline shows the new
+ * one being built; when it closes, it replaces the old one with its What's
+ * Changed at the top. A version that failed is never shown as the report — the
+ * most recent one that finished is, with a line saying the update did not.
  */
 
 const POLL_MS = 1500;
-const TERMINAL: ReadonlyArray<ResearchSession["status"]> = [
-  "complete",
-  "partial",
-  "failed",
-];
+const TERMINAL: ReadonlyArray<ResearchSession["status"]> = ["complete", "partial", "failed"];
 
 type Props = {
   sessionId: string;
+  /** A specific version to show. Absent means the latest finished one. */
+  versionNumber?: number;
 };
 
-export function Workspace({ sessionId }: Props) {
+export function Workspace({ sessionId, versionNumber }: Props) {
   const router = useRouter();
   const [session, setSession] = useState<ResearchSession | null>(null);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
@@ -57,6 +65,12 @@ export function Workspace({ sessionId }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [missing, setMissing] = useState(false);
+
+  // Bumped to restart polling after the reader starts an update.
+  const [generation, setGeneration] = useState(0);
+  const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   // Refs, not state: the loop reads them on every tick, and re-rendering on a
   // cursor change would tear the interval down and build it again.
@@ -95,31 +109,29 @@ export function Workspace({ sessionId }: Props) {
           setEvents((current) => [...current, ...page.events]);
         }
 
-        // The report is only worth fetching once a version has closed: before
-        // that it is half-written by definition, and `REQ-VER-002` means a
-        // closed version never changes again, so it is fetched exactly once.
-        const latest = nextSession.versions.at(-1);
-        if (latest?.closed_at && loadedVersion.current !== latest.id) {
-          loadedVersion.current = latest.id;
-          const loaded = await getVersion(sessionId, latest.version_number);
+        // Only a closed version is worth fetching: before that it is half
+        // written, and `REQ-VER-002` means a closed version never changes, so
+        // each one is fetched exactly once.
+        const target = chooseVersion(nextSession.versions, versionNumber);
+        if (versionNumber !== undefined && !target) {
+          const exists = nextSession.versions.some((v) => v.version_number === versionNumber);
+          setMissing(!exists);
+        }
+        if (target && loadedVersion.current !== target.id) {
+          loadedVersion.current = target.id;
+          const loaded = await getVersion(sessionId, target.version_number);
           if (!stopped) setVersion(loaded);
 
           // The conversation comes back with the report (`REQ-CONV-007 AC-2`).
-          // Fetched here rather than in the panel so returning to saved
-          // research restores the transcript with everything else, in one
-          // pass, instead of the panel flashing empty and filling in.
           const transcript = await getMessages(sessionId);
           if (!stopped) setMessages(transcript);
         }
 
-        // A tab left open on finished research should cost nothing.
         if (TERMINAL.includes(nextSession.status)) stop();
       } catch (cause) {
         if (stopped) return;
         setError(
-          cause instanceof ApiError
-            ? cause.message
-            : "Could not reach the service. Retrying.",
+          cause instanceof ApiError ? cause.message : "Could not reach the service. Retrying.",
         );
       }
     };
@@ -132,7 +144,22 @@ export function Workspace({ sessionId }: Props) {
     }, POLL_MS);
 
     return stop;
-  }, [sessionId]);
+  }, [sessionId, versionNumber, generation]);
+
+  async function onUpdate() {
+    setUpdating(true);
+    setUpdateError(null);
+    try {
+      await updateResearch(sessionId);
+      setGeneration((value) => value + 1);
+    } catch (cause) {
+      setUpdateError(
+        cause instanceof ApiError ? cause.message : "Could not reach the service. Try again.",
+      );
+    } finally {
+      setUpdating(false);
+    }
+  }
 
   if (error && !session) {
     return (
@@ -144,38 +171,106 @@ export function Workspace({ sessionId }: Props) {
     );
   }
 
+  const versions = session?.versions ?? [];
+  const latestFinished = chooseVersion(versions, undefined);
+  const newest = versions.at(-1);
+  const viewingLatest =
+    versionNumber === undefined || versionNumber === latestFinished?.version_number;
+  const updateFailed =
+    viewingLatest && !running && newest?.status === "failed" && latestFinished !== null;
+
   return (
     <div className="shell py-14 md:py-20">
       <header className="max-w-[46rem]">
         <p className="claim-label">
-          {session ? STATUS_WORD[session.status] : "Loading"}
+          {headerWord(session, version, running)}
         </p>
-        <h1 className="display-m mt-3 text-ink">
-          {session?.objective ?? " "}
-        </h1>
+        <h1 className="display-m mt-3 text-ink">{session?.objective ?? " "}</h1>
         {session?.subject_interpretation_note ? (
           <p className="measure mt-4 text-small text-ink-muted">
             {session.subject_interpretation_note}
           </p>
         ) : null}
 
-        {session ? <ShortfallNotice status={session.status} /> : null}
+        {version ? (
+          <ShortfallNotice status={version.status} />
+        ) : session && !running ? (
+          <ShortfallNotice status={session.status} />
+        ) : null}
+
+        {updateFailed && latestFinished ? (
+          <p role="status" className="measure mt-5 border-l-2 border-ochre-deep pl-4 text-small text-ink-soft">
+            The latest update could not be completed. Version {latestFinished.version_number},
+            below, is the most recent finished report, unchanged.
+          </p>
+        ) : null}
+
+        {!viewingLatest && version && latestFinished ? (
+          <p role="status" className="measure mt-5 border-l-2 border-ink pl-4 text-small text-ink-soft">
+            You are viewing version {version.version_number}, from{" "}
+            {formatDate(version.created_at)}. It is kept exactly as it was.{" "}
+            <Link
+              href={`/research/${sessionId}`}
+              className="whitespace-nowrap text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ochre-deep"
+            >
+              Go to the latest, version {latestFinished.version_number}
+            </Link>
+          </p>
+        ) : null}
+
+        {running && version ? (
+          <p role="status" className="measure mt-5 text-small text-ink-muted">
+            Updating. Version {version.version_number} stays here until the new version is ready.
+          </p>
+        ) : null}
+
+        {missing ? (
+          <p role="alert" className="measure mt-5 border-l-2 border-ochre-deep pl-4 text-small text-ink-soft">
+            That version does not exist.
+          </p>
+        ) : null}
 
         {session ? (
           <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
+            {viewingLatest && !running && latestFinished ? (
+              <button
+                type="button"
+                onClick={onUpdate}
+                disabled={updating}
+                className="inline-flex h-10 items-center rounded-sm border border-line-strong px-4 text-small font-medium text-ink transition-colors duration-200 hover:border-ink hover:bg-surface disabled:cursor-not-allowed disabled:text-ink-muted"
+              >
+                {updating ? "Starting update" : "Update research"}
+              </button>
+            ) : null}
             <SaveToAccount sessionId={sessionId} />
-            <DeleteResearch
-              sessionId={sessionId}
-              onDeleted={() => router.push("/research/new")}
-            />
+            <DeleteResearch sessionId={sessionId} onDeleted={() => router.push("/research/new")} />
           </div>
+        ) : null}
+
+        {updateError ? (
+          <p role="alert" className="mt-4 text-small text-ink-soft">
+            {updateError}
+          </p>
+        ) : null}
+
+        {session ? (
+          <VersionNav
+            sessionId={sessionId}
+            versions={versions}
+            shownNumber={version?.version_number ?? null}
+            latestNumber={latestFinished?.version_number ?? null}
+          />
         ) : null}
       </header>
 
       <div className="hairline mt-10" />
 
       <div className="mt-10 grid gap-14 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-20">
-        <div className="order-2 lg:order-1">
+        <div className="order-2 flex flex-col gap-14 lg:order-1">
+          {version?.change_summary ? (
+            <WhatsChanged summary={version.change_summary} sessionId={sessionId} />
+          ) : null}
+
           {version ? (
             <ReportView version={version} />
           ) : (
@@ -186,13 +281,12 @@ export function Workspace({ sessionId }: Props) {
             </p>
           )}
 
-          {/* `REQ-WORK-007`: the conversation lives with the report, not on a
-              separate page. A question is about what the reader is looking at,
-              and making them navigate away to ask it breaks the context the
-              whole feature exists to preserve. Only once there is research to
-              interrogate. */}
-          {version ? (
-            <div className="mt-20">
+          {/* `REQ-WORK-007`: the conversation lives with the report. Only on the
+              latest version, because a follow-up is answered from the research
+              as it stands now, and asking it beside an older version would
+              suggest otherwise. */}
+          {version && viewingLatest ? (
+            <div className="mt-6">
               <div className="hairline mb-10" />
               <ConversationPanel
                 sessionId={sessionId}
@@ -207,13 +301,39 @@ export function Workspace({ sessionId }: Props) {
           <ActivityTimeline events={events} running={running} />
           {/* `REQ-DOC-003 AC-3`: a failed upload does not silently vanish. */}
           <AttachedDocuments uploads={uploads} />
-          {error ? (
-            <p className="mt-6 text-micro text-ink-muted">{error}</p>
-          ) : null}
+          {error ? <p className="mt-6 text-micro text-ink-muted">{error}</p> : null}
         </aside>
       </div>
     </div>
   );
+}
+
+/**
+ * Which version to show: the one asked for once it has closed, or else the
+ * newest that finished with a report. A failed version produced no report, so
+ * it is never chosen as "the latest".
+ */
+function chooseVersion(
+  versions: VersionListing[],
+  requested: number | undefined,
+): VersionListing | null {
+  if (requested !== undefined) {
+    const found = versions.find((v) => v.version_number === requested);
+    return found?.closed_at ? found : null;
+  }
+  const finished = versions.filter((v) => v.closed_at && v.status !== "failed");
+  return finished.at(-1) ?? null;
+}
+
+function headerWord(
+  session: ResearchSession | null,
+  version: Version | null,
+  running: boolean,
+): string {
+  if (!session) return "Loading";
+  if (running) return version ? "Updating" : STATUS_WORD[session.status];
+  if (version) return VERSION_WORD[version.status];
+  return STATUS_WORD[session.status];
 }
 
 /**
@@ -224,7 +344,7 @@ export function Workspace({ sessionId }: Props) {
  * This is the part that has to be visible before any of it is read, so nobody
  * mistakes a partial report for a complete one.
  */
-function ShortfallNotice({ status }: { status: ResearchSession["status"] }) {
+function ShortfallNotice({ status }: { status: string }) {
   if (status !== "partial" && status !== "failed") return null;
 
   return (
@@ -275,6 +395,20 @@ const STATUS_WORD: Record<ResearchSession["status"], string> = {
   failed: "Could not complete",
 };
 
+const VERSION_WORD: Record<Version["status"], string> = {
+  building: "In progress",
+  complete: "Complete",
+  partial: "Complete with gaps",
+  failed: "Could not complete",
+};
+
+function formatDate(value: string): string {
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
 /**
  * Evidence id to the source behind it.

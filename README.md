@@ -2,15 +2,18 @@
 
 Turns a question into an evidence-backed report with sources, analysis, charts and follow-up.
 
-**Status: Phase 5 complete.** Research without an account, save it to one, and
-come back to it.
+**Status: Phase 6 complete.** Research without an account, save it to one, come
+back to it, and update it without losing what it said before.
 
 Ask a question at `/research/new`, watch the activity timeline fill in as the
 worker executes the steps, and read the report that comes back with citations,
 retrieval dates, confidence, conflicts, charts and a conversation panel. Attach
 documents and they join the evidence. Create an account from inside the research
 and it comes with you; sign in later and it is in saved research, with its
-versions and conversation. Delete it and it is gone, files and all.
+versions and conversation. Press Update Research and it re-checks the same
+questions against fresh sources, most volatile first, into a new version that
+leads with What's Changed; every earlier version stays readable exactly as it
+was. Delete it and it is gone, files and all.
 
 See `docs/superpowers/specs/implementation-plan.md` §13 for the phase plan and
 `docs/decisions/` for resolved open questions.
@@ -37,6 +40,7 @@ packages/scrapr_core/ all Python domain logic
   orchestrator/       the four-step research pipeline
   synthesis/          the validation gate
   lifecycle/          deletion, expiry and the purge sweep
+  versioning/         update prioritisation and What's Changed
 packages/contracts/   openapi.json, generated from the API
 docs/                 specs and decision records
 design-system/        MASTER.md, the landing visual system

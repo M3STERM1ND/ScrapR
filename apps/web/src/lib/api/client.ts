@@ -34,6 +34,9 @@ export type EvidenceItem = Schemas["EvidenceOut"];
 export type Message = Schemas["MessageOut"];
 export type AskResult = Schemas["AskOut"];
 export type VisualizationSpec = Schemas["VisualizationOut"];
+export type VersionListing = Schemas["VersionSummary"];
+export type ChangeSummary = Schemas["ChangeSummaryOut"];
+export type Change = Schemas["ChangeOut"];
 export type ActivityEvent = Schemas["ActivityEventOut"];
 export type ActivityPage = Schemas["ActivityPage"];
 
@@ -130,6 +133,18 @@ export function getActivity(
 ): Promise<ActivityPage> {
   const query = new URLSearchParams({ after: String(after) });
   return request<ActivityPage>(`/v1/research/${sessionId}/activity?${query}`);
+}
+
+/**
+ * Update Research (`REQ-VER-001`): fresh retrieval into a new version.
+ *
+ * Returns as soon as the run is queued. The previous version stays exactly as
+ * it is; the new one appears in the version list and fills in as it runs.
+ */
+export function updateResearch(sessionId: string): Promise<CreateResearchResponse> {
+  return request<CreateResearchResponse>(`/v1/research/${sessionId}/update`, {
+    method: "POST",
+  });
 }
 
 /** Proof the generated paths are the ones this module calls. */

@@ -110,6 +110,17 @@ class Settings(BaseSettings):
         ),
     )
 
+    retrieval_cache_ttl_seconds: float = Field(
+        default=900.0,
+        alias="RETRIEVAL_CACHE_TTL_SECONDS",
+        gt=0,
+        description=(
+            "How long an identical retrieval is reused within one run "
+            "(`REQ-TOOL-013 AC-4`, `DEC-19`). The cache never outlives its run, "
+            "so Update Research always re-fetches."
+        ),
+    )
+
     # ------------------------------------------------------------------
     # Object storage — `DEC-12`, closing `OPEN-10`
     # ------------------------------------------------------------------

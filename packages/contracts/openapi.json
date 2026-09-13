@@ -174,6 +174,222 @@
         "title": "AuthorityTier",
         "type": "string"
       },
+      "ChangeCategory": {
+        "description": "The masterplan's kinds of change (`REQ-VER-006 AC-2`), plus a remainder.",
+        "enum": [
+          "financial_figures",
+          "stock_information",
+          "job_postings",
+          "new_products",
+          "new_competitors",
+          "forecast_assumptions",
+          "other"
+        ],
+        "title": "ChangeCategory",
+        "type": "string"
+      },
+      "ChangeCountsOut": {
+        "properties": {
+          "new_sources": {
+            "title": "New Sources",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unchanged",
+          "new_sources"
+        ],
+        "title": "ChangeCountsOut",
+        "type": "object"
+      },
+      "ChangeKind": {
+        "description": "The closed set of changes `DEC-20` recognises. Order is display order.",
+        "enum": [
+          "conclusion_changed",
+          "figure_changed",
+          "newer_period",
+          "assumptions_changed",
+          "new_finding",
+          "gap_closed",
+          "gap_opened",
+          "no_longer_found"
+        ],
+        "title": "ChangeKind",
+        "type": "string"
+      },
+      "ChangeOut": {
+        "description": "One meaningful difference from the previous version (`DEC-20`).",
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeSideOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeSideOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "$ref": "#/components/schemas/ChangeCategory"
+          },
+          "confidence_change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceChangeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChangeKind"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "category",
+          "summary",
+          "before",
+          "after",
+          "evidence_ids",
+          "confidence_change"
+        ],
+        "title": "ChangeOut",
+        "type": "object"
+      },
+      "ChangeSideOut": {
+        "description": "One side of a change: the claim as it stood in one version.",
+        "properties": {
+          "claim_id": {
+            "format": "uuid",
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_type": {
+            "$ref": "#/components/schemas/ClaimType"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "claim_id",
+          "text",
+          "claim_type",
+          "confidence",
+          "value",
+          "period"
+        ],
+        "title": "ChangeSideOut",
+        "type": "object"
+      },
+      "ChangeSummaryOut": {
+        "description": "What's Changed (`REQ-VER-006`). Null on a first version.\n\n`available` is false when the comparison could not be made; the report is\nstill complete, and the workspace says the summary is missing rather than\nimplying nothing changed.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeOut"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "compared_with": {
+            "$ref": "#/components/schemas/ComparedVersionOut"
+          },
+          "counts": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeCountsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_changes": {
+            "default": false,
+            "title": "Has Changes",
+            "type": "boolean"
+          },
+          "headline": {
+            "default": "",
+            "title": "Headline",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "compared_with"
+        ],
+        "title": "ChangeSummaryOut",
+        "type": "object"
+      },
       "ClaimOut": {
         "description": "One assertion, typed, with the sources behind it (`REQ-SYNTH-002..003`).",
         "properties": {
@@ -266,6 +482,64 @@
         ],
         "title": "ClaimType",
         "type": "string"
+      },
+      "ComparedVersionOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version_id",
+          "version_number",
+          "created_at"
+        ],
+        "title": "ComparedVersionOut",
+        "type": "object"
+      },
+      "ConfidenceChangeOut": {
+        "description": "`REQ-VER-007 AC-3`: a confidence change is stated with the conclusion.",
+        "properties": {
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "ConfidenceChangeOut",
+        "type": "object"
       },
       "ConflictCause": {
         "description": "Why two pieces of evidence disagree (`REQ-EVID-013 AC-1`).",
@@ -810,6 +1084,16 @@
         "title": "ResearchStatus",
         "type": "string"
       },
+      "RunKind": {
+        "description": "Which job produced this run (implementation plan \u00a77.1).",
+        "enum": [
+          "initial",
+          "update",
+          "conversation"
+        ],
+        "title": "RunKind",
+        "type": "string"
+      },
       "SectionOut": {
         "description": "A report section and the claims it renders.",
         "properties": {
@@ -1142,6 +1426,16 @@
       "VersionOut": {
         "description": "One whole version, in one response.",
         "properties": {
+          "change_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "claims": {
             "items": {
               "$ref": "#/components/schemas/ClaimOut"
@@ -1177,6 +1471,16 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "sections": {
             "items": {
@@ -1263,6 +1567,16 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status": {
             "$ref": "#/components/schemas/VersionStatus"
@@ -2297,6 +2611,82 @@
           }
         },
         "summary": "Start Research",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/v1/research/{session_id}/update": {
+      "post": {
+        "description": "Update Research: fresh retrieval into a new version (`REQ-VER-001`, `REQ-VER-005`).\n\n**Only ever from this request.** Nothing schedules it and nothing retries it\non a timer (`REQ-VER-009`); a reader pressing the control is the only thing\nthat reaches this line.\n\n**Refused while research is already running**, because two runs would open\ntwo versions against one baseline and race to be current. Refused, too,\nwhen there is no completed version to update: an update is measured against\na report, and a failed first run produced none.\n\nThe previous version is untouched by any of this (`REQ-VER-002`): the new\nversion gets its own sources, evidence and retrieval timestamps, and the\nsession's current pointer moves while every earlier version stays readable.",
+        "operationId": "update_research_v1_research__session_id__update_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateResearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Research",
         "tags": [
           "research"
         ]

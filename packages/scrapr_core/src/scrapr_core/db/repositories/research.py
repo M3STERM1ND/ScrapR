@@ -104,23 +104,31 @@ class ResearchRepository:
     # Versions
     # ------------------------------------------------------------------
 
-    def open_version(self, session_id: UUID) -> ResearchVersion | None:
+    def open_version(
+        self, session_id: UUID, *, compare_with: ResearchVersion | None = None
+    ) -> ResearchVersion | None:
         """Start the next version of a session, or `None` if it is not ours.
 
         The version number is derived from what already exists rather than kept
         as a counter, and `unique (session_id, version_number)` is what makes
         that safe: two concurrent opens collide instead of both winning.
+
+        `compare_with` names the version the new one is measured against when
+        that is not simply the latest — an update after a failed attempt is
+        compared with the last version that completed (`DEC-20`), never with
+        the failure.
         """
         session = self.get_session(session_id)
         if session is None:
             return None
 
-        previous = self.latest_version(session_id)
+        latest = self.latest_version(session_id)
+        baseline = compare_with if compare_with is not None else latest
         version = ResearchVersion(
             session_id=session.id,
-            version_number=1 if previous is None else previous.version_number + 1,
+            version_number=1 if latest is None else latest.version_number + 1,
             status=VersionStatus.BUILDING,
-            previous_version_id=None if previous is None else previous.id,
+            previous_version_id=None if baseline is None else baseline.id,
         )
         self._session.add(version)
         self._session.flush()
@@ -146,6 +154,24 @@ class ResearchRepository:
         statement = (
             select(ResearchVersion)
             .where(ResearchVersion.session_id == session_id)
+            .order_by(ResearchVersion.version_number.desc())
+            .limit(1)
+        )
+        return self._session.execute(statement).scalar_one_or_none()
+
+    def latest_completed_version(self, session_id: UUID) -> ResearchVersion | None:
+        """The newest version that closed with a report, complete or partial.
+
+        What Update Research measures against. A failed version produced no
+        report to compare, and a building one is not finished.
+        """
+        statement = (
+            select(ResearchVersion)
+            .where(
+                ResearchVersion.session_id == session_id,
+                ResearchVersion.closed_at.is_not(None),
+                ResearchVersion.status.in_((VersionStatus.COMPLETE, VersionStatus.PARTIAL)),
+            )
             .order_by(ResearchVersion.version_number.desc())
             .limit(1)
         )

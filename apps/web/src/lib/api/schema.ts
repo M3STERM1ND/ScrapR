@@ -298,6 +298,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/research/{session_id}/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Research
+         * @description Update Research: fresh retrieval into a new version (`REQ-VER-001`, `REQ-VER-005`).
+         *
+         *     **Only ever from this request.** Nothing schedules it and nothing retries it
+         *     on a timer (`REQ-VER-009`); a reader pressing the control is the only thing
+         *     that reaches this line.
+         *
+         *     **Refused while research is already running**, because two runs would open
+         *     two versions against one baseline and race to be current. Refused, too,
+         *     when there is no completed version to update: an update is measured against
+         *     a report, and a failed first run produced none.
+         *
+         *     The previous version is untouched by any of this (`REQ-VER-002`): the new
+         *     version gets its own sources, evidence and retrieval timestamps, and the
+         *     session's current pointer moves while every earlier version stays readable.
+         */
+        post: operations["update_research_v1_research__session_id__update_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/research/{session_id}/uploads": {
         parameters: {
             query?: never;
@@ -493,6 +526,86 @@ export interface components {
          */
         AuthorityTier: "primary" | "secondary" | "lower";
         /**
+         * ChangeCategory
+         * @description The masterplan's kinds of change (`REQ-VER-006 AC-2`), plus a remainder.
+         * @enum {string}
+         */
+        ChangeCategory: "financial_figures" | "stock_information" | "job_postings" | "new_products" | "new_competitors" | "forecast_assumptions" | "other";
+        /** ChangeCountsOut */
+        ChangeCountsOut: {
+            /** New Sources */
+            new_sources: number;
+            /** Unchanged */
+            unchanged: number;
+        };
+        /**
+         * ChangeKind
+         * @description The closed set of changes `DEC-20` recognises. Order is display order.
+         * @enum {string}
+         */
+        ChangeKind: "conclusion_changed" | "figure_changed" | "newer_period" | "assumptions_changed" | "new_finding" | "gap_closed" | "gap_opened" | "no_longer_found";
+        /**
+         * ChangeOut
+         * @description One meaningful difference from the previous version (`DEC-20`).
+         */
+        ChangeOut: {
+            after: components["schemas"]["ChangeSideOut"] | null;
+            before: components["schemas"]["ChangeSideOut"] | null;
+            category: components["schemas"]["ChangeCategory"];
+            confidence_change: components["schemas"]["ConfidenceChangeOut"] | null;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            kind: components["schemas"]["ChangeKind"];
+            /** Summary */
+            summary: string;
+        };
+        /**
+         * ChangeSideOut
+         * @description One side of a change: the claim as it stood in one version.
+         */
+        ChangeSideOut: {
+            /**
+             * Claim Id
+             * Format: uuid
+             */
+            claim_id: string;
+            claim_type: components["schemas"]["ClaimType"];
+            /** Confidence */
+            confidence: string | null;
+            /** Period */
+            period: string | null;
+            /** Text */
+            text: string;
+            /** Value */
+            value: string | null;
+        };
+        /**
+         * ChangeSummaryOut
+         * @description What's Changed (`REQ-VER-006`). Null on a first version.
+         *
+         *     `available` is false when the comparison could not be made; the report is
+         *     still complete, and the workspace says the summary is missing rather than
+         *     implying nothing changed.
+         */
+        ChangeSummaryOut: {
+            /** Available */
+            available: boolean;
+            /** Changes */
+            changes?: components["schemas"]["ChangeOut"][];
+            compared_with: components["schemas"]["ComparedVersionOut"];
+            counts?: components["schemas"]["ChangeCountsOut"] | null;
+            /**
+             * Has Changes
+             * @default false
+             */
+            has_changes: boolean;
+            /**
+             * Headline
+             * @default
+             */
+            headline: string;
+        };
+        /**
          * ClaimOut
          * @description One assertion, typed, with the sources behind it (`REQ-SYNTH-002..003`).
          */
@@ -528,6 +641,31 @@ export interface components {
          * @enum {string}
          */
         ClaimType: "fact" | "analysis" | "forecast" | "uncertainty";
+        /** ComparedVersionOut */
+        ComparedVersionOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Number */
+            version_number: number;
+        };
+        /**
+         * ConfidenceChangeOut
+         * @description `REQ-VER-007 AC-3`: a confidence change is stated with the conclusion.
+         */
+        ConfidenceChangeOut: {
+            /** From */
+            from: string | null;
+            /** To */
+            to: string | null;
+        };
         /**
          * ConflictCause
          * @description Why two pieces of evidence disagree (`REQ-EVID-013 AC-1`).
@@ -791,6 +929,12 @@ export interface components {
          */
         ResearchStatus: "pending" | "running" | "complete" | "partial" | "failed";
         /**
+         * RunKind
+         * @description Which job produced this run (implementation plan §7.1).
+         * @enum {string}
+         */
+        RunKind: "initial" | "update" | "conversation";
+        /**
          * SectionOut
          * @description A report section and the claims it renders.
          */
@@ -954,6 +1098,7 @@ export interface components {
          * @description One whole version, in one response.
          */
         VersionOut: {
+            change_summary?: components["schemas"]["ChangeSummaryOut"] | null;
             /** Claims */
             claims: components["schemas"]["ClaimOut"][];
             /** Closed At */
@@ -970,6 +1115,7 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            origin?: components["schemas"]["RunKind"] | null;
             /** Sections */
             sections: components["schemas"]["SectionOut"][];
             /**
@@ -1008,6 +1154,7 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            origin?: components["schemas"]["RunKind"] | null;
             status: components["schemas"]["VersionStatus"];
             /** Version Number */
             version_number: number;
@@ -1473,6 +1620,40 @@ export interface operations {
         };
     };
     start_research_v1_research__session_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateResearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_research_v1_research__session_id__update_post: {
         parameters: {
             query?: never;
             header?: never;

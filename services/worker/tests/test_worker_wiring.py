@@ -26,7 +26,7 @@ from scrapr_core.config import Settings
 from scrapr_core.lifecycle import PurgeReport
 from scrapr_core.llm.anthropic_provider import AnthropicProvider
 from scrapr_core.llm.scripted import ScriptedProvider
-from scrapr_core.orchestrator.pipeline import STAGES
+from scrapr_core.orchestrator.pipeline import CONVERSATION_STAGES, STAGES, UPDATE_STAGES
 from scrapr_core.storage.processing import ProcessedUpload
 from scrapr_core.tools import RegistryFrozenError, ToolCategory
 from scrapr_core.tools.builder import build_registry
@@ -248,7 +248,9 @@ def test_every_stage_has_a_handler(monkeypatch: pytest.MonkeyPatch) -> None:
 
     runner = build_runner("test-worker")
 
-    assert set(runner._handlers) == set(STAGES)
+    # Every stage of every kind of run: first research, Update Research, and
+    # follow-up research (`DEC-19`, `DEC-20`).
+    assert set(runner._handlers) == {*STAGES, *UPDATE_STAGES, *CONVERSATION_STAGES}
 
 
 # --------------------------------------------------------------------------

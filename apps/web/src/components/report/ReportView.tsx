@@ -216,7 +216,9 @@ function ClaimBlock({
   sourcesById: Map<string, Source>;
 }) {
   return (
-    <div className={`claim ${CLAIM_CLASS[claim.claim_type]}`}>
+    // The id is an anchor: What's Changed links a change to the claim it
+    // describes, in this version or the one before (`REQ-VER-007 AC-2`).
+    <div id={`claim-${claim.id}`} className={`claim scroll-mt-24 ${CLAIM_CLASS[claim.claim_type]}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="claim-label">{CLAIM_WORD[claim.claim_type]}</p>
         <ConfidenceTag confidence={claim.confidence} />

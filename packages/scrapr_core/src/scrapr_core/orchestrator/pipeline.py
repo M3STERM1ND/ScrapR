@@ -14,6 +14,12 @@ Stages 5, 6, 8, 9 and 11 — normalise, dedupe and tier, conflict, confidence,
 visualize — are Phase 2 and 3 work. They slot in between without moving these
 boundaries, which is why the steps are grouped rather than one per stage.
 
+**Update Research swaps the first two steps and adds a last one** (`DEC-19`,
+`DEC-20`): `prioritize` carries the previous version's questions forward in
+the order most likely to have changed, and `compare` writes What's Changed
+before the runner closes the version. Follow-up research keeps the four and
+adds `compare`.
+
 **Steps read each other's checkpoints, not each other's memory.** The plan step
 may run in a different process from the interpret step, so it reads what that
 step durably recorded. That is also what makes a re-run cheap: the work is on
@@ -26,14 +32,17 @@ tool or query (`REQ-ACT-003`, `REQ-AGENT-003 AC-3`).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import final
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from scrapr_core.config import get_settings
+from scrapr_core.db.base import utcnow
 from scrapr_core.db.enums import (
     ActivityStatus,
     ClaimType,
@@ -47,6 +56,7 @@ from scrapr_core.db.models import (
     ClaimEvidence,
     ConversationMessage,
     Evidence,
+    QuestionEvidence,
     QuestionState,
     ReportSection,
     ResearchQuestion,
@@ -95,15 +105,29 @@ from scrapr_core.orchestrator.visualize import Chartable, select_visualization
 from scrapr_core.synthesis.validation import validate_version
 from scrapr_core.tools.contract import ToolCategory, ToolFailure
 from scrapr_core.tools.registry import ToolRegistry
+from scrapr_core.versioning import (
+    AreaHistory,
+    CitedEvidence,
+    compare_versions,
+    prioritize_areas,
+)
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
+    "COMPARE_STAGE",
+    "CONVERSATION_STAGES",
     "INTERPRET_STAGE",
     "PLAN_STAGE",
+    "PRIORITIZE_STAGE",
     "RESEARCH_STAGE",
     "STAGES",
     "SYNTHESIZE_STAGE",
+    "UPDATE_STAGES",
+    "CompareHandler",
     "InterpretHandler",
     "PlanHandler",
+    "PrioritizeHandler",
     "ResearchHandler",
     "SynthesizeHandler",
     "build_handlers",
@@ -113,14 +137,28 @@ INTERPRET_STAGE = "interpret"
 PLAN_STAGE = "plan"
 RESEARCH_STAGE = "research"
 SYNTHESIZE_STAGE = "synthesize"
+PRIORITIZE_STAGE = "prioritize"
+COMPARE_STAGE = "compare"
 
 STAGES = (INTERPRET_STAGE, PLAN_STAGE, RESEARCH_STAGE, SYNTHESIZE_STAGE)
+"""A first run: nothing to compare against."""
+
+UPDATE_STAGES = (PRIORITIZE_STAGE, RESEARCH_STAGE, SYNTHESIZE_STAGE, COMPARE_STAGE)
+"""Update Research (`REQ-VER-001..007`, `DEC-19`). No interpret and no plan:
+the subject and the questions are exactly what is being re-checked, and
+re-planning would move the target the comparison measures against."""
+
+CONVERSATION_STAGES = (*STAGES, COMPARE_STAGE)
+"""Follow-up research (`REQ-CONV-003`). It plans afresh for the follow-up, and
+its version still gets What's Changed (`DEC-20`, "what counts as a path")."""
 
 # `REQ-ACT-002 AC-1` sets the register: plain language a non-technical reader
 # follows. Kept together so the vocabulary cannot drift apart.
 LABEL_INTERPRET = "Understanding the objective"
 LABEL_PLAN = "Identifying research areas"
 LABEL_SYNTHESIZE = "Building the report"
+LABEL_PRIORITIZE = "Checking what may have changed"
+LABEL_COMPARE = "Comparing with the previous version"
 
 
 def _area_label(area_name: str) -> str:
@@ -263,7 +301,9 @@ class ResearchHandler:
             )
 
         budget = RunBudget()
-        cache = RetrievalCache()
+        # Empty at the start of every run, which is what makes Update Research
+        # re-fetch rather than remember (`DEC-19`, `REQ-VER-003 AC-1`).
+        cache = RetrievalCache(ttl_seconds=get_settings().retrieval_cache_ttl_seconds)
         summaries: list[JsonMapping] = []
 
         # Areas in plan order: a single area cannot consume more than its
@@ -920,7 +960,187 @@ def build_handlers(
         PLAN_STAGE: PlanHandler(provider=provider, registry=registry),
         RESEARCH_STAGE: ResearchHandler(provider=provider, registry=registry),
         SYNTHESIZE_STAGE: SynthesizeHandler(provider=provider),
+        PRIORITIZE_STAGE: PrioritizeHandler(),
+        COMPARE_STAGE: CompareHandler(),
     }
+
+
+# --------------------------------------------------------------------------
+# Update Research — `REQ-VER-003..007`, `DEC-19`, `DEC-20`
+# --------------------------------------------------------------------------
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class PrioritizeHandler:
+    """Carry the previous plan forward, most-likely-changed areas first.
+
+    Replaces interpret and plan on an update. The questions are copied rather
+    than re-planned so both versions answer the same questions; the order is
+    what changes, so the budget reaches volatile and stale areas before stable
+    ones (`REQ-VER-003 AC-3`). No model call: the ordering rules are three
+    tiers a person can read in the checkpoint.
+    """
+
+    async def execute(self, context: StepContext) -> JsonMapping:
+        session = context.session
+        questions = QuestionRepository(session)
+        research = _research_session(context)
+        version_id = context.run.version_id
+
+        base = _base_version(context)
+
+        existing = questions.for_version(version_id)
+        if existing:
+            # A re-run after a crash: the plan is already committed.
+            return {
+                "base_version_id": str(base.id),
+                "areas": len({question.area_name for question in existing}),
+                "replanned": False,
+            }
+
+        activity = ActivityRepository(session)
+        activity.append(
+            research.id, LABEL_PRIORITIZE, ActivityStatus.IN_PROGRESS, version_id=version_id
+        )
+
+        histories = _area_histories(session, base.id)
+        if not histories:
+            raise StepPermanentError(
+                "the version being updated planned no questions to re-check"
+            )
+
+        ordered = prioritize_areas(histories, now=utcnow())
+        questions.persist_plan(
+            version_id,
+            [(entry.area.name, entry.area.questions, entry.area.categories) for entry in ordered],
+        )
+
+        activity.append(
+            research.id, LABEL_PRIORITIZE, ActivityStatus.COMPLETE, version_id=version_id
+        )
+        return {
+            "base_version_id": str(base.id),
+            "areas": [
+                {
+                    "area": entry.area.name,
+                    "priority": entry.priority.name.lower(),
+                    "reason": entry.reason,
+                }
+                for entry in ordered
+            ],
+            "replanned": True,
+        }
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class CompareHandler:
+    """Write What's Changed onto the new version (`REQ-VER-004`, `REQ-VER-006`).
+
+    Runs after synthesis, before the runner closes the version, so the summary
+    is part of the immutable version rather than something added to it later.
+
+    **A comparison that cannot be made does not fail the version.** The report
+    itself is complete and validated by the time this runs; losing it because a
+    summary could not be assembled would punish the reader for a defect in the
+    summary. The version records that What's Changed is unavailable instead.
+    """
+
+    async def execute(self, context: StepContext) -> JsonMapping:
+        session = context.session
+        research = _research_session(context)
+        version_id = context.run.version_id
+        version = session.get(ResearchVersion, version_id)
+        if version is None:  # pragma: no cover - enforced by the foreign key
+            raise StepPermanentError("the run references a missing version")
+
+        base = _base_version(context)
+        activity = ActivityRepository(session)
+        activity.append(
+            research.id, LABEL_COMPARE, ActivityStatus.IN_PROGRESS, version_id=version_id
+        )
+
+        try:
+            summary = compare_versions(session, base, version)
+        except Exception:
+            logger.exception("comparison against version %s failed", base.version_number)
+            version.change_summary = {
+                "schema_version": 1,
+                "available": False,
+                "compared_with": {
+                    "version_id": str(base.id),
+                    "version_number": base.version_number,
+                    "created_at": base.created_at.isoformat(),
+                },
+            }
+            session.flush()
+            activity.append(
+                research.id, LABEL_COMPARE, ActivityStatus.FAILED, version_id=version_id
+            )
+            return {"available": False}
+
+        version.change_summary = {"available": True, **summary.as_json()}
+        session.flush()
+        activity.append(
+            research.id, LABEL_COMPARE, ActivityStatus.COMPLETE, version_id=version_id
+        )
+        return {
+            "available": True,
+            "changes": len(summary.changes),
+            "unchanged": summary.unchanged,
+        }
+
+
+def _base_version(context: StepContext) -> ResearchVersion:
+    """The version this run's version is measured against.
+
+    `previous_version_id`, set when the version was opened: for an update, the
+    most recent version that completed, so a failed attempt in between is never
+    the baseline.
+    """
+    version = context.session.get(ResearchVersion, context.run.version_id)
+    base_id = version.previous_version_id if version else None
+    base = context.session.get(ResearchVersion, base_id) if base_id else None
+    if base is None:
+        raise StepPermanentError("there is no earlier version to compare or update from")
+    return base
+
+
+def _area_histories(session: Session, version_id: UUID) -> list[AreaHistory]:
+    """The previous version's areas, in its plan order, with their evidence."""
+    planned = QuestionRepository(session).for_version(version_id)
+
+    cited: dict[str, list[CitedEvidence]] = {}
+    for area_name, content, published_at, retrieved_at in session.execute(
+        select(ResearchQuestion.area_name, Evidence.content, Source.published_at, Source.retrieved_at)
+        .join(QuestionEvidence, QuestionEvidence.question_id == ResearchQuestion.id)
+        .join(Evidence, Evidence.id == QuestionEvidence.evidence_id)
+        .join(Source, Source.id == Evidence.source_id)
+        .where(ResearchQuestion.version_id == version_id)
+    ).all():
+        cited.setdefault(area_name, []).append(
+            CitedEvidence(content=content, published_at=published_at, retrieved_at=retrieved_at)
+        )
+
+    histories: list[AreaHistory] = []
+    for area_name in dict.fromkeys(question.area_name for question in planned):
+        area_questions = [question for question in planned if question.area_name == area_name]
+        histories.append(
+            AreaHistory(
+                name=area_name,
+                questions=tuple(question.text for question in area_questions),
+                categories=tuple(
+                    dict.fromkeys(
+                        str(category)
+                        for question in area_questions
+                        for category in question.tool_categories
+                    )
+                ),
+                evidence=tuple(cited.get(area_name, ())),
+            )
+        )
+    return histories
 
 
 def _persist_visualizations(context: StepContext, version_id: UUID) -> None:

@@ -168,6 +168,33 @@ async def test_an_identical_request_is_not_made_twice(registry: ToolRegistry) ->
     assert first.item_count == second.item_count
 
 
+async def test_an_expired_entry_is_retrieved_again(registry: ToolRegistry) -> None:
+    """`REQ-TOOL-013 AC-4`, `DEC-19`: the in-run lifetime is configurable."""
+    now = [0.0]
+    cache = RetrievalCache(ttl_seconds=60, clock=lambda: now[0])
+    reserved = reservation()
+
+    await retrieve_area("A", [ToolCategory.WEB_SEARCH], QUERY, registry, reserved, cache)
+    now[0] = 30.0
+    await retrieve_area("B", [ToolCategory.WEB_SEARCH], QUERY, registry, reserved, cache)
+    now[0] = 120.0
+    await retrieve_area("C", [ToolCategory.WEB_SEARCH], QUERY, registry, reserved, cache)
+
+    assert cache.hits == 1
+    assert reserved.spent == 2
+
+
+def test_every_run_starts_with_an_empty_cache() -> None:
+    """`REQ-VER-003 AC-1`: freshness on update is structural, not a flag.
+
+    The cache is an object a run creates, so there is no shared instance for an
+    update to forget to bypass.
+    """
+    assert RetrievalCache().get(
+        ToolRequest(category=ToolCategory.NEWS, params={"query": QUERY})
+    ) is None
+
+
 async def test_a_cached_result_keeps_its_original_retrieval_time(
     registry: ToolRegistry,
 ) -> None:

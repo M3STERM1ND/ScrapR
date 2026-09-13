@@ -13,10 +13,12 @@ Two rules run through every handler:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from scrapr_api.deps import CurrentOwner, DbSession, OwnerOrNew, Research
@@ -27,6 +29,7 @@ from scrapr_api.schemas import (
     ActivityPage,
     AskIn,
     AskOut,
+    ChangeSummaryOut,
     ClaimOut,
     ConflictOut,
     ConflictSideOut,
@@ -42,7 +45,13 @@ from scrapr_api.schemas import (
     VisualizationOut,
 )
 from scrapr_core.config import get_settings
-from scrapr_core.db.enums import ClaimType, MessageRole, RunKind, SourceCategory
+from scrapr_core.db.enums import (
+    ClaimType,
+    MessageRole,
+    ResearchStatus,
+    RunKind,
+    SourceCategory,
+)
 from scrapr_core.db.models import (
     Claim,
     ClaimEvidence,
@@ -72,8 +81,10 @@ from scrapr_core.orchestrator.converse import (
     answer_question,
     classify_intent,
 )
-from scrapr_core.orchestrator.pipeline import STAGES
+from scrapr_core.orchestrator.pipeline import CONVERSATION_STAGES, STAGES, UPDATE_STAGES
 from scrapr_worker.main import build_provider
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/research", tags=["research"])
 
@@ -163,11 +174,16 @@ def start_research(
 
 
 @router.get("/{session_id}")
-def get_research(session_id: UUID, research: Research) -> ResearchSessionOut:
+def get_research(
+    session_id: UUID, research: Research, session: DbSession
+) -> ResearchSessionOut:
     """The session header the workspace renders around (`REQ-WORK-002`)."""
     found = research.get_session(session_id)
     if found is None:
         raise _not_found()
+
+    versions = research.list_versions(session_id)
+    origins = RunRepository(session).kinds_by_version([version.id for version in versions])
 
     return ResearchSessionOut(
         id=found.id,
@@ -185,9 +201,65 @@ def get_research(session_id: UUID, research: Research) -> ResearchSessionOut:
                 status=version.status,
                 created_at=version.created_at,
                 closed_at=version.closed_at,
+                origin=origins.get(version.id),
             )
-            for version in research.list_versions(session_id)
+            for version in versions
         ],
+    )
+
+
+@router.post("/{session_id}/update", status_code=status.HTTP_202_ACCEPTED)
+def update_research(
+    session_id: UUID,
+    research: Research,
+    session: DbSession,
+) -> CreateResearchResponse:
+    """Update Research: fresh retrieval into a new version (`REQ-VER-001`, `REQ-VER-005`).
+
+    **Only ever from this request.** Nothing schedules it and nothing retries it
+    on a timer (`REQ-VER-009`); a reader pressing the control is the only thing
+    that reaches this line.
+
+    **Refused while research is already running**, because two runs would open
+    two versions against one baseline and race to be current. Refused, too,
+    when there is no completed version to update: an update is measured against
+    a report, and a failed first run produced none.
+
+    The previous version is untouched by any of this (`REQ-VER-002`): the new
+    version gets its own sources, evidence and retrieval timestamps, and the
+    session's current pointer moves while every earlier version stays readable.
+    """
+    found = research.get_session(session_id)
+    if found is None:
+        raise _not_found()
+
+    runs = RunRepository(session)
+    if runs.has_active_run(session_id):
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "research_in_progress",
+            "This research is still running. Update it once it finishes.",
+        )
+
+    baseline = research.latest_completed_version(session_id)
+    if baseline is None:
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "nothing_to_update",
+            "There is no finished report to update yet. Start the research again instead.",
+        )
+
+    version = research.open_version(session_id, compare_with=baseline)
+    if version is None:  # pragma: no cover - ownership was checked above
+        raise _not_found()
+
+    runs.create_run(session_id, version.id, UPDATE_STAGES, kind=RunKind.UPDATE)
+    found.status = ResearchStatus.PENDING
+
+    return CreateResearchResponse(
+        session_id=session_id,
+        version_id=version.id,
+        version_number=version.version_number,
     )
 
 
@@ -365,6 +437,8 @@ def get_version(
         status=version.status,
         created_at=version.created_at,
         closed_at=version.closed_at,
+        origin=RunRepository(session).kinds_by_version([version.id]).get(version.id),
+        change_summary=_change_summary(version.change_summary),
         sections=[
             SectionOut(
                 id=section.id,
@@ -432,6 +506,22 @@ def get_version(
             for row in viz_rows
         ],
     )
+
+
+def _change_summary(stored: dict[str, object] | None) -> ChangeSummaryOut | None:
+    """The stored What's Changed, or nothing when there is none to show.
+
+    A summary that no longer parses — written by an older schema, say — is
+    dropped rather than failing the whole report: the version is still
+    readable, and the workspace shows no summary rather than a broken one.
+    """
+    if not stored:
+        return None
+    try:
+        return ChangeSummaryOut.model_validate(stored)
+    except ValidationError:
+        logger.warning("an unreadable change summary was skipped")
+        return None
 
 
 def _reported_value(evidence: Evidence) -> str:
@@ -569,7 +659,11 @@ async def ask(
         # because `REQ-VER-002` makes the current one immutable and adding
         # evidence to a closed version would break the promise that an answer
         # stays checkable against what it actually read.
-        next_version = research.open_version(session_id)
+        # Measured against the last version that finished, never a failure
+        # or a run still building (`DEC-20`).
+        next_version = research.open_version(
+            session_id, compare_with=research.latest_completed_version(session_id)
+        )
         if next_version is None:
             raise _not_found()
 
@@ -584,7 +678,12 @@ async def ask(
             context_ref=body.context_ref,
         )
         RunRepository(session).create_run(
-            session_id, next_version.id, STAGES, kind=RunKind.CONVERSATION
+            session_id,
+            next_version.id,
+            CONVERSATION_STAGES
+            if next_version.previous_version_id is not None
+            else STAGES,
+            kind=RunKind.CONVERSATION,
         )
 
         grounded = GroundedAnswer(

@@ -26,11 +26,13 @@ from scrapr_core.db.enums import (
     ConflictStatus,
     MessageRole,
     ResearchStatus,
+    RunKind,
     SourceCategory,
     UploadState,
     VersionStatus,
     VizKind,
 )
+from scrapr_core.versioning import ChangeCategory, ChangeKind
 
 __all__ = [
     "ActivityEventOut",
@@ -94,6 +96,10 @@ class VersionSummary(BaseModel):
     status: VersionStatus
     created_at: dt.datetime
     closed_at: dt.datetime | None
+    origin: RunKind | None = None
+    """What produced this version: the first research, an update, or research
+    a follow-up question started (`DEC-20`). Shown in the version list so the
+    reader knows why each version exists."""
 
 
 class ResearchSessionOut(BaseModel):
@@ -253,6 +259,70 @@ class SectionOut(BaseModel):
     claim_ids: list[UUID]
 
 
+class ChangeSideOut(BaseModel):
+    """One side of a change: the claim as it stood in one version."""
+
+    claim_id: UUID
+    text: str
+    claim_type: ClaimType
+    confidence: str | None
+    value: str | None
+    """The figure exactly as reported, when the change is about a figure."""
+    period: str | None
+
+
+class ConfidenceChangeOut(BaseModel):
+    """`REQ-VER-007 AC-3`: a confidence change is stated with the conclusion."""
+
+    from_: str | None = Field(alias="from")
+    to: str | None
+
+    model_config = {"populate_by_name": True}
+
+
+class ChangeOut(BaseModel):
+    """One meaningful difference from the previous version (`DEC-20`)."""
+
+    kind: ChangeKind
+    category: ChangeCategory
+    """Which of the masterplan's kinds of change this is (`REQ-VER-006 AC-2`)."""
+    summary: str
+    before: ChangeSideOut | None
+    """Null for something new. Its claim id resolves in the compared version."""
+    after: ChangeSideOut | None
+    """Null for something no longer found. Its claim id resolves in this one."""
+    evidence_ids: list[UUID]
+    """The new evidence responsible (`REQ-VER-007 AC-1`), in this version."""
+    confidence_change: ConfidenceChangeOut | None
+
+
+class ComparedVersionOut(BaseModel):
+    version_id: UUID
+    version_number: int
+    created_at: dt.datetime
+
+
+class ChangeCountsOut(BaseModel):
+    unchanged: int
+    new_sources: int
+
+
+class ChangeSummaryOut(BaseModel):
+    """What's Changed (`REQ-VER-006`). Null on a first version.
+
+    `available` is false when the comparison could not be made; the report is
+    still complete, and the workspace says the summary is missing rather than
+    implying nothing changed.
+    """
+
+    available: bool
+    compared_with: ComparedVersionOut
+    has_changes: bool = False
+    headline: str = ""
+    changes: list[ChangeOut] = Field(default_factory=list)
+    counts: ChangeCountsOut | None = None
+
+
 class VersionOut(BaseModel):
     """One whole version, in one response."""
 
@@ -262,6 +332,9 @@ class VersionOut(BaseModel):
     status: VersionStatus
     created_at: dt.datetime
     closed_at: dt.datetime | None
+    origin: RunKind | None = None
+    change_summary: ChangeSummaryOut | None = None
+    """What's Changed against `change_summary.compared_with` (`REQ-VER-006`)."""
     sections: list[SectionOut]
     claims: list[ClaimOut]
     sources: list[SourceOut]

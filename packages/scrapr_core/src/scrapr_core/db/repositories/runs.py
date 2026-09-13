@@ -82,6 +82,38 @@ class RunRepository:
             is not None
         )
 
+    def has_active_run(self, session_id: UUID) -> bool:
+        """Whether any run of this session is still pending or running.
+
+        Update Research refuses while one is: two runs would open two versions
+        against the same baseline and race to be current, and the reader would
+        be told of changes twice.
+        """
+        return (
+            self._session.execute(
+                select(ResearchRun.id)
+                .where(
+                    ResearchRun.session_id == session_id,
+                    ResearchRun.status.in_((RunStatus.PENDING, RunStatus.RUNNING)),
+                )
+                .limit(1)
+            ).first()
+            is not None
+        )
+
+    def kinds_by_version(self, version_ids: Sequence[UUID]) -> dict[UUID, RunKind]:
+        """Which kind of run produced each version: initial, update or follow-up."""
+        if not version_ids:
+            return {}
+        return {
+            version_id: kind
+            for version_id, kind in self._session.execute(
+                select(ResearchRun.version_id, ResearchRun.kind).where(
+                    ResearchRun.version_id.in_(version_ids)
+                )
+            ).all()
+        }
+
     def steps(self, run_id: UUID) -> Sequence[RunStep]:
         """A run's steps in execution order."""
         statement = (

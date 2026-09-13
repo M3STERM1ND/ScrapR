@@ -39,9 +39,11 @@ __all__ = [
     "disputed_registry",
     "disputing_provider",
     "estimate_registry",
+    "extraction_provider",
     "fixture_registry",
     "period_split_registry",
     "run_pipeline",
+    "run_update",
     "scripted_provider",
     "search_tool",
     "trend_provider",
@@ -199,6 +201,61 @@ async def run_pipeline(
     provider.enqueue(synthesis(evidence_ids))
 
     await runner.run_one()  # synthesize
+
+
+async def run_update(
+    session_factory: sessionmaker[Session],
+    registry: ToolRegistry,
+    provider: FakeLLMProvider,
+    synthesis: Callable[[Sequence[UUID]], SynthesisDraft] = default_synthesis,
+    worker_id: str = "update-test",
+) -> None:
+    """Run an Update Research run: prioritize, research, synthesize, compare.
+
+    Synthesis is primed with the evidence *this* run gathered, which is the
+    newest rows: an update must cite what it fetched, never what the version it
+    updates fetched (`REQ-VER-002`, `DEC-19`).
+    """
+    runner = JobRunner(
+        session_factory, build_handlers(provider, registry), worker_id=worker_id
+    )
+
+    await runner.run_one()  # prioritize
+    await runner.run_one()  # research
+
+    with session_factory() as session:
+        latest_version = session.execute(
+            select(Evidence.version_id).order_by(Evidence.extracted_at.desc()).limit(1)
+        ).scalar_one()
+        evidence_ids = list(
+            session.execute(
+                select(Evidence.id)
+                .where(Evidence.version_id == latest_version)
+                .order_by(Evidence.extracted_at)
+            )
+            .scalars()
+            .all()
+        )
+    provider.enqueue(synthesis(evidence_ids))
+
+    await runner.run_one()  # synthesize
+    await runner.run_one()  # compare
+
+
+def extraction_provider(statement: str, excerpt: str) -> FakeLLMProvider:
+    """A provider that only extracts, for runs that neither interpret nor plan."""
+    return FakeLLMProvider(
+        standing_response=Extraction(
+            evidence=[
+                ExtractedEvidence(statement=statement, excerpt=excerpt, item_index=0),
+                ExtractedEvidence(
+                    statement="Acme listed 40 open engineering roles.",
+                    excerpt="40 open engineering roles",
+                    item_index=1,
+                ),
+            ]
+        )
+    )
 
 
 # --------------------------------------------------------------------------

@@ -806,7 +806,7 @@ The system SHOULD cache tool results and reuse evidence to control research cost
 - `AC-1` Repeated identical retrievals within a research run do not repeat the external call.
 - `AC-2` Cached results retain their original retrieval timestamp, not the cache-hit time.
 - `AC-3` Update Research bypasses the cache for freshness-sensitive retrieval (`REQ-VER-003`).
-- `AC-4` Cache lifetime is configurable (`OPEN-26`).
+- `AC-4` Cache lifetime is configurable (`OPEN-26`, closed by `DEC-19`: `RETRIEVAL_CACHE_TTL_SECONDS`, within one run).
 
 ---
 
@@ -1692,7 +1692,7 @@ The system MUST compare new evidence against the previous version.
 **Acceptance criteria**
 - `AC-1` Comparison detects changed values, new sources, and removed or superseded information.
 - `AC-2` Comparison operates on normalized evidence so unit or currency differences are not reported as change (`REQ-EVID-008`).
-- `AC-3` What counts as a meaningful difference is defined (`OPEN-27`).
+- `AC-3` What counts as a meaningful difference is defined (`OPEN-27`, closed by `DEC-20`).
 
 ---
 
@@ -2531,7 +2531,7 @@ The eight phases are the masterplan's, unchanged. Each phase has a success condi
 
 **Goal:** Keep research current without losing history.
 **Requirements:** `REQ-VER-001..009`, `REQ-DATA-003`
-**Blocking open questions:** `OPEN-26`, `OPEN-27`
+**Blocking open questions:** none remain. ~~`OPEN-26`~~ closed by `DEC-19`, ~~`OPEN-27`~~ by `DEC-20`.
 **Exit condition:** Users can keep research current without losing previous versions.
 
 ### Phase 7 — Exports
@@ -2590,7 +2590,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
 | ~~`OPEN-13`~~ | **Closed by `DEC-04`**, 2026-09-09. Research sufficiency and termination criteria. See §13.10 and `docs/decisions/OPEN-13.md`. | — | — |
-| `OPEN-26` | What is the evidence cache lifetime, and which retrievals are freshness-sensitive enough to bypass it? | Phase 1 (design), Phase 6 (enforce) | A |
+| ~~`OPEN-26`~~ | **Closed by `DEC-19`**, 2026-09-13. The retrieval cache lives for one run (TTL within it configurable) and never crosses runs, sessions or users, so Update Research re-fetches everything by construction. No evidence is reused across versions. Updates re-ask the previous plan's questions, stale and volatile areas first. See `docs/decisions/OPEN-26-27.md`. | — | — |
 | `OPEN-29` | What is the acceptable cost ceiling per research run, and what happens when a run approaches it? Sets `TBD-10` and `TBD-11`. | Phase 8 | Both |
 
 ### 13.4 Evidence and trust
@@ -2600,7 +2600,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 | ~~`OPEN-14`~~ | **Closed by `DEC-09`**, 2026-09-12. Three discrete levels — High/Moderate/Low — computed by a pure function of tier, corroboration, conflict and recency. See `docs/decisions/OPEN-14.md`. | — | — |
 | ~~`OPEN-15`~~ | **Closed by `DEC-08`**, 2026-09-12. A static, ordered rule table evaluated at insert, with the rule that fired recorded in `tier_rationale`. Default tier becomes `LOWER`. See `docs/decisions/OPEN-15.md`. | — | — |
 | ~~`OPEN-16`~~ | **Closed by `DEC-10`**, 2026-09-12. Per-metric-class tolerances in a version-controlled table; 1.0% relative default. See `docs/decisions/OPEN-16.md`. | — | — |
-| `OPEN-27` | What counts as a "meaningful difference" for the What's Changed summary? Without this, an update either reports noise or misses real change. | Phase 6 | A |
+| ~~`OPEN-27`~~ | **Closed by `DEC-20`**, 2026-09-13. A difference is meaningful when the evidence changed, not the words: figures beyond the `DEC-10` tolerance, newer periods, changed confidence, type or assessment on a conclusion, changed forecast assumptions, findings on new sources, claims whose sources did not come back, and gaps opened or closed. Rewording, in-tolerance figures and source churn are never reported. Assembled from rows, never by a model. | — | — |
 
 ### 13.5 Anonymous access and accounts
 
@@ -2665,7 +2665,10 @@ Decisions the masterplan did not make and the team has since confirmed. These ar
 | `DEC-17` | **Anonymous sessions live 30 days past last activity and are claimable while valid.** Claimed automatically on sign-up and sign-in, or explicitly, in one transaction selecting only the caller's anonymous session; a claimed or expired session resolves to nobody. | `OPEN-17` | `REQ-AUTH-002`, `REQ-AUTH-004`, `REQ-SEC-009` | 2026-09-13 |
 | `DEC-18` | **Deletion is hard, with no retention window.** Hidden and stopped in the request, stored files removed at once, rows purged within 30 minutes by the worker's sweep. Deleted uploads keep a metadata row so prior versions record that they existed. | `OPEN-24` | `REQ-SEC-008`, `REQ-EXP-008 AC-3`, `REQ-AUTH-008 AC-3` | 2026-09-13 |
 
-**Open questions remaining** after `DEC-18`: `OPEN-03` (narrowed), `OPEN-18`, `OPEN-21`, `OPEN-22`, `OPEN-23`, `OPEN-26`, `OPEN-27`, `OPEN-29`.
+| `DEC-19` | **The retrieval cache is run-scoped.** Configurable TTL within a run, never shared across runs, sessions or users; Update Research therefore re-fetches every category, and no evidence is reused across versions. Updates re-ask the previous version's questions, ordered stale, then volatile, then stable. Full record: `docs/decisions/OPEN-26-27.md`. | `OPEN-26`, `N-07` | `REQ-TOOL-013`, `REQ-VER-003` | 2026-09-13 |
+| `DEC-20` | **What's Changed reports evidence changes, never rewording**, by the closed list of change kinds in the record, each labelled with the masterplan's categories and linked to the claims on both sides and the new evidence. Follow-up research that opens a version is treated as a user-initiated path alongside Update Research and gets the same summary. | `OPEN-27` | `REQ-VER-001`, `REQ-VER-004..007` | 2026-09-13 |
+
+**Open questions remaining** after `DEC-20`: `OPEN-03` (narrowed), `OPEN-18`, `OPEN-21`, `OPEN-22`, `OPEN-23`, `OPEN-29`.
 
 ---
 

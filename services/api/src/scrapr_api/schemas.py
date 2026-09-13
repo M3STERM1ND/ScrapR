@@ -134,6 +134,13 @@ class SourceOut(BaseModel):
     upload_id: UUID | None = None
     """Which uploaded file, when `category` is `document`. Null otherwise."""
 
+    document_removed: bool = False
+    """Whether the uploaded file behind this source has since been deleted.
+
+    `REQ-AUTH-008 AC-3`: a prior version records that the document existed
+    rather than silently changing its evidence base, so the citation stays and
+    says plainly that the file it came from is gone (`DEC-18`)."""
+
 
 class EvidenceOut(BaseModel):
     """One piece of evidence behind a claim, as the inspector shows it.
@@ -398,3 +405,65 @@ class UploadOut(BaseModel):
     the honest answer to "did anything come out of this file"."""
 
     created_at: dt.datetime
+
+
+# --------------------------------------------------------------------------
+# Accounts — `DEC-16`, `DEC-17`, `REQ-AUTH-003..005`
+# --------------------------------------------------------------------------
+
+
+class CredentialsIn(BaseModel):
+    """An email and password, for signing up or signing in.
+
+    Bounds here are only what keeps the request sane. The password rule
+    itself (`DEC-16`) is checked by the route, so a too-short password gets a
+    message saying what the rule is rather than a generic validation failure.
+    """
+
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class AccountOut(BaseModel):
+    """The signed-in account, as the account itself may see it."""
+
+    email: str
+    created_at: dt.datetime
+
+
+class AuthOut(BaseModel):
+    """The outcome of signing up or signing in."""
+
+    account: AccountOut
+    claimed: int
+    """How many research sessions moved from this browser's anonymous session
+    into the account (`REQ-AUTH-004 AC-1`). Zero when there were none."""
+
+
+class SessionStateOut(BaseModel):
+    """Who this browser is signed in as, if anyone.
+
+    A 200 with `account: null` rather than a 401, because "not signed in" is
+    the ordinary state of most visitors and not an error to log in a console.
+    """
+
+    account: AccountOut | None
+
+
+class OwnershipClaimOut(BaseModel):
+    """What claiming anonymous research moved (`REQ-AUTH-004`). Not to be
+    confused with `ClaimOut`, an assertion in a report."""
+
+    claimed: int
+
+
+class HistoryItemOut(BaseModel):
+    """One saved research session in the history list (`REQ-AUTH-005 AC-1`)."""
+
+    id: UUID
+    objective: str
+    subject: str | None
+    status: ResearchStatus
+    created_at: dt.datetime
+    updated_at: dt.datetime
+    version_count: int

@@ -292,7 +292,7 @@ Representative questions the masterplan requires support for: *"Why do you think
 **Implemented by:** `REQ-AUTH-002..009`, `REQ-SEC-001`, `REQ-SEC-002`
 **Complete when:** The research appears in the account's history and is inaccessible to any other account. Satisfies DoD 13, 17.
 
-**Open dependency:** The mechanism and time limit for associating pre-account research with a new account is `OPEN-17`. Until it is resolved, step E-3 is unspecified.
+**Resolved dependency:** The mechanism and time limit for associating pre-account research with a new account were `OPEN-17`, closed by `DEC-17`: research is claimed automatically on sign-up or sign-in while its anonymous session is valid (30 days since last activity). See `docs/decisions/OPEN-11-17-24.md`.
 
 ---
 
@@ -2524,7 +2524,7 @@ The eight phases are the masterplan's, unchanged. Each phase has a success condi
 
 **Goal:** Let users leave and return safely.
 **Requirements:** `REQ-AUTH-001..009`, `REQ-DATA-001`, `REQ-SEC-001..004`, `REQ-SEC-008..009`, `REQ-SEC-016`
-**Blocking open questions:** `OPEN-11`, `OPEN-17`, `OPEN-24`
+**Blocking open questions:** none remain. ~~`OPEN-11`~~ closed by `DEC-16`, ~~`OPEN-17`~~ by `DEC-17`, ~~`OPEN-24`~~ by `DEC-18`.
 **Exit condition:** Users can leave and return to their research securely.
 
 ### Phase 6 — Updates
@@ -2571,7 +2571,7 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 | `OPEN-03` | Which queue/worker technology for background research and export jobs, **and where do those workers execute**? Vercel is the confirmed deployment platform (`DEC-03`) and its serverless execution limits may be exceeded by research runs and export generation. The answer must state how a run exceeding that limit satisfies `NFR-REL-001`. See §11.5. `websitedesign.md` says "Redis + workers"; that is shorthand, not a decision, and it says nothing about worker execution location. See implementation plan `N-05`. | Phase 1 | A |
 | ~~`OPEN-04`~~ | **Closed by `DEC-06`**, 2026-09-12. Anthropic, with `CHEAP`/`STANDARD`/`DEEP` mapped to Haiku 4.5 / Sonnet 5 / Opus 5 as configuration. See `docs/decisions/OPEN-04.md`. | — | — |
 | ~~`OPEN-10`~~ | **Closed by `DEC-12`**, 2026-09-12. The S3 API is the contract; Cloudflare R2 in production, MinIO in docker compose locally. Vercel Blob rejected despite `DEC-03`: no S3 surface, so no local equivalent. See `docs/decisions/OPEN-10.md`. | — | — |
-| `OPEN-11` | Which authentication mechanism or provider? | Phase 5 | B |
+| ~~`OPEN-11`~~ | **Closed by `DEC-16`**, 2026-09-13. First-party email and password: Argon2id hashes, server-side sessions in Postgres behind an `HttpOnly` cookie, 30-day absolute lifetime, rate-limited sign-in. No password reset until an email provider exists. See `docs/decisions/OPEN-11-17-24.md`. | — | — |
 | ~~`OPEN-12`~~ | **Closed by `DEC-15`**, 2026-09-12. PostgreSQL full-text search; no vector search in V1. `pgvector` remains a column and an index away, which is why deferring is cheap. | — | — |
 | ~~`OPEN-25`~~ | **Closed by `DEC-11`**, 2026-09-12. Hand-authored inline SVG from a renderer-agnostic spec, so one spec renders in the workspace and in a headless export without a browser in the pipeline. Also defines the product's semantic token layer (implementation plan §11.4). See `docs/decisions/OPEN-25.md`. | — | — |
 
@@ -2606,9 +2606,9 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
-| `OPEN-17` | **How does anonymous research work, and how is it claimed?** The masterplan requires a full anonymous experience including export (§17) and private-by-default research (§18), but anonymous research has no owner to isolate it to. Must define: how an anonymous session is identified, how long anonymous research survives, whether it expires or is deleted, and the eligibility window and mechanism for attaching it to a new account. | Phase 5 | Both |
+| ~~`OPEN-17`~~ | **Closed by `DEC-17`**, 2026-09-13. A hashed 256-bit cookie token; 30 days since last activity, then expired and purged; claimable while valid, automatically on sign-up and sign-in or via `POST /v1/research/claim`, in one transaction that can only select the caller's own anonymous session. | — | — |
 | `OPEN-18` | How is the anonymous flow rate limited without an account to attribute usage to? Anonymous research is expensive and uncapped by default. | Phase 8 | Both |
-| `OPEN-24` | What are the deletion semantics — soft or hard delete, retention window, and what happens to prior versions and exports when a session is deleted? | Phase 5 | A |
+| ~~`OPEN-24`~~ | **Closed by `DEC-18`**, 2026-09-13. Hard delete, no retention window: hidden and stopped in the request, files removed from storage at once, every row purged within 30 minutes. Versions and exports go with the session. A deleted upload keeps its metadata row so prior versions record that it existed. | — | — |
 
 ### 13.6 Documents
 
@@ -2661,7 +2661,11 @@ Decisions the masterplan did not make and the team has since confirmed. These ar
 
 | `DEC-05` | **Claims are a Phase 1 entity, claim confidence stays Phase 2.** Resolves the contradiction where `REQ-EVID-017` (Phase 1) rejects "any fact-type claim lacking evidence linkage" while the Claim entity, claim typing and the rest of the Phase 1 validation gate sat in Phase 2. Six requirements move to Phase 1: `REQ-EVID-010` (claim formation, confidence half deferred), `REQ-EVID-018` (never assert reading inaccessible content), `REQ-SYNTH-001` (claim type classification, already annotated Phase 1 but rostered Phase 2), `REQ-SYNTH-009` (forecast assumptions), `REQ-SYNTH-010` (explicit insufficiency, required by `DEC-04`'s ceiling disclosure), and `REQ-DATA-006` (Claim, confidence and conflict fields nullable until Phase 2). | `N-08` | §12 Phase 1 and Phase 2 rosters, `REQ-EVID-010`, `REQ-EVID-018`, `REQ-SYNTH-001`, `REQ-SYNTH-009`, `REQ-SYNTH-010`, `REQ-DATA-006` | 2026-09-09 |
 
-**Open questions remaining: 25** of the 29 originally registered.
+| `DEC-16` | **Authentication: first-party email and password.** Argon2id hashes, server-side sessions in Postgres behind an `HttpOnly`, `Secure`, `SameSite=Lax` cookie, 30-day absolute lifetime, sign-in and sign-up rate-limited in Postgres. No password reset or email verification until an email provider exists. Full record: `docs/decisions/OPEN-11-17-24.md`. | `OPEN-11` | `REQ-AUTH-003`, `REQ-AUTH-009`, `REQ-DATA-001` | 2026-09-13 |
+| `DEC-17` | **Anonymous sessions live 30 days past last activity and are claimable while valid.** Claimed automatically on sign-up and sign-in, or explicitly, in one transaction selecting only the caller's anonymous session; a claimed or expired session resolves to nobody. | `OPEN-17` | `REQ-AUTH-002`, `REQ-AUTH-004`, `REQ-SEC-009` | 2026-09-13 |
+| `DEC-18` | **Deletion is hard, with no retention window.** Hidden and stopped in the request, stored files removed at once, rows purged within 30 minutes by the worker's sweep. Deleted uploads keep a metadata row so prior versions record that they existed. | `OPEN-24` | `REQ-SEC-008`, `REQ-EXP-008 AC-3`, `REQ-AUTH-008 AC-3` | 2026-09-13 |
+
+**Open questions remaining** after `DEC-18`: `OPEN-03` (narrowed), `OPEN-18`, `OPEN-21`, `OPEN-22`, `OPEN-23`, `OPEN-26`, `OPEN-27`, `OPEN-29`.
 
 ---
 
@@ -2689,7 +2693,7 @@ These are not new product decisions; they are gaps the masterplan's own requirem
 |---|---|---|
 | **Unbounded research runs** | *Mitigated by `DEC-04`.* The masterplan required adaptive depth and agent-determined sufficiency but defined no stopping rule. The coverage gate supplies one; the residual risk is that the numeric ceilings (`TBD-04`, `TBD-10`) ship unset. | `DEC-04`, `OPEN-23`, `OPEN-29`, `REQ-AGENT-005` |
 | **Coverage gate rests on question quality** | `DEC-04` measures sufficiency against the questions stage 2 plans. Vague or overlapping questions make coverage a meaningless gate, and a shallow area is declared sufficient. | `REQ-AGENT-002 AC-3`, `DEC-04` §12 |
-| **Anonymous research has no owner** | Full anonymous use (§17) and private-by-default (§18) are both required, but privacy needs an owner to isolate to. | `OPEN-17`, `REQ-AUTH-002`, `REQ-SEC-009` |
+| **Anonymous research has no owner** | *Mitigated by `DEC-17`.* Full anonymous use (§17) and private-by-default (§18) are both required, but privacy needs an owner to isolate to. The anonymous session is that owner, with a defined lifetime and claim path. | `DEC-17`, `REQ-AUTH-002`, `REQ-SEC-009` |
 | **Uncapped anonymous cost** | Anonymous users can trigger expensive research with no account to attribute or limit it. | `OPEN-18`, `REQ-SEC-010` |
 | **Conflict detection tuned too tight or too loose** | With no defined numeric tolerance, the product either reports rounding differences as conflicts or misses real disagreement. Both undermine the trust core. | `OPEN-16`, `REQ-EVID-012` |
 

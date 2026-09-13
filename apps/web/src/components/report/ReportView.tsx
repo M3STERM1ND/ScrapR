@@ -351,6 +351,7 @@ function EvidenceDetail({
             </span>
             {". "}
             <span className="tnum">Read {formatDate(source.retrieved_at)}</span>
+            {source.document_removed ? ". File since deleted" : null}
             {item.reporting_period ? (
               <>
                 {". "}
@@ -547,6 +548,11 @@ function Citation({ source }: { source: Source }) {
       {/* `REQ-EVID-003 AC-2`: the tier is visible, so a lower-tier source is
           shown with its standing rather than quietly dropped (`AC-3`). */}
       <span className="tier-tag">{TIER_WORD[source.authority_tier] ?? source.authority_tier}</span>
+      {/* `REQ-AUTH-008 AC-3`: the version still records that the document
+          existed, and says the file itself has since been removed. */}
+      {source.document_removed ? (
+        <span className="text-ink-muted">File since deleted</span>
+      ) : null}
     </span>
   );
 }

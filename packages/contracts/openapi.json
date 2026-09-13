@@ -1,6 +1,26 @@
 {
   "components": {
     "schemas": {
+      "AccountOut": {
+        "description": "The signed-in account, as the account itself may see it.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "created_at"
+        ],
+        "title": "AccountOut",
+        "type": "object"
+      },
       "ActivityEventOut": {
         "description": "One timeline entry. User-facing text only (`REQ-ACT-003`).",
         "properties": {
@@ -124,6 +144,24 @@
           "researched"
         ],
         "title": "AskOut",
+        "type": "object"
+      },
+      "AuthOut": {
+        "description": "The outcome of signing up or signing in.",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountOut"
+          },
+          "claimed": {
+            "title": "Claimed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "account",
+          "claimed"
+        ],
+        "title": "AuthOut",
         "type": "object"
       },
       "AuthorityTier": {
@@ -450,6 +488,29 @@
         "title": "CreateResearchResponse",
         "type": "object"
       },
+      "CredentialsIn": {
+        "description": "An email and password, for signing up or signing in.\n\nBounds here are only what keeps the request sane. The password rule\nitself (`DEC-16`) is checked by the route, so a too-short password gets a\nmessage saying what the rule is rather than a generic validation failure.",
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "CredentialsIn",
+        "type": "object"
+      },
       "EvidenceOut": {
         "description": "One piece of evidence behind a claim, as the inspector shows it.\n\n`REQ-EVID-019 AC-1` names what inspection must show, and \"the relevant\nevidence\" is the item the payload did not carry: source, tier and retrieval\ntime were all reachable through `source_ids`, but the *excerpt* \u2014 the words\nthe source actually printed \u2014 existed only in the database.\n\nThat excerpt is the whole point of the citation surface. A reader checking\na claim is checking it against what was written, not against a link.",
         "properties": {
@@ -525,6 +586,59 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HistoryItemOut": {
+        "description": "One saved research session in the history list (`REQ-AUTH-005 AC-1`).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "objective": {
+            "title": "Objective",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ResearchStatus"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_count": {
+            "title": "Version Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "objective",
+          "subject",
+          "status",
+          "created_at",
+          "updated_at",
+          "version_count"
+        ],
+        "title": "HistoryItemOut",
+        "type": "object"
+      },
       "MessageOut": {
         "description": "One conversation turn (`REQ-CONV-007`).",
         "properties": {
@@ -588,6 +702,20 @@
         ],
         "title": "MessageRole",
         "type": "string"
+      },
+      "OwnershipClaimOut": {
+        "description": "What claiming anonymous research moved (`REQ-AUTH-004`). Not to be\nconfused with `ClaimOut`, an assertion in a report.",
+        "properties": {
+          "claimed": {
+            "title": "Claimed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "claimed"
+        ],
+        "title": "OwnershipClaimOut",
+        "type": "object"
       },
       "ResearchSessionOut": {
         "description": "The session header the workspace renders around (`REQ-WORK-002`).",
@@ -721,6 +849,26 @@
         "title": "SectionOut",
         "type": "object"
       },
+      "SessionStateOut": {
+        "description": "Who this browser is signed in as, if anyone.\n\nA 200 with `account: null` rather than a 401, because \"not signed in\" is\nthe ordinary state of most visitors and not an error to log in a console.",
+        "properties": {
+          "account": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "account"
+        ],
+        "title": "SessionStateOut",
+        "type": "object"
+      },
       "SourceCategory": {
         "description": "Which tool category produced the source (`REQ-TOOL-002..007`).",
         "enum": [
@@ -743,6 +891,11 @@
           },
           "category": {
             "$ref": "#/components/schemas/SourceCategory"
+          },
+          "document_removed": {
+            "default": false,
+            "title": "Document Removed",
+            "type": "boolean"
           },
           "id": {
             "format": "uuid",
@@ -1222,11 +1375,342 @@
         ]
       }
     },
+    "/v1/auth/session": {
+      "get": {
+        "description": "Who this browser is signed in as. Never a 401.",
+        "operationId": "get_session_state_v1_auth_session_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session State",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/signin": {
+      "post": {
+        "description": "Sign in, and bring this browser's anonymous research into the account.",
+        "operationId": "sign_in_v1_auth_signin_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sign In",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/signout": {
+      "post": {
+        "description": "Revoke this browser's account session. Idempotent.\n\nRevoked in the database, not only cleared in the browser: a copy of the\ncookie taken before sign-out must stop working too.",
+        "operationId": "sign_out_v1_auth_signout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sign Out",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/signup": {
+      "post": {
+        "description": "Create an account, sign this browser in, and bring its research along.",
+        "operationId": "sign_up_v1_auth_signup_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sign Up",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/me/research": {
+      "get": {
+        "description": "The account's research, most recently updated first.",
+        "operationId": "list_history_v1_me_research_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryItemOut"
+                  },
+                  "title": "Response List History V1 Me Research Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List History",
+        "tags": [
+          "history"
+        ]
+      }
+    },
     "/v1/research": {
       "post": {
         "description": "Start research. **202**, because the answer does not exist yet.\n\nThe response is committed rows and nothing else: the run is picked up by\nwhatever is polling `run_steps`, which is what keeps `OPEN-03` a hosting\nquestion (implementation plan \u00a75.6).",
         "operationId": "create_research_v1_research_post",
         "parameters": [
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
           {
             "in": "cookie",
             "name": "scrapr_session",
@@ -1282,7 +1766,140 @@
         ]
       }
     },
+    "/v1/research/claim": {
+      "post": {
+        "description": "Attach this browser's anonymous research to the signed-in account.\n\nFor a visitor who researched while signed out and is already signed in on\nthis browser. Needs both halves: an account to receive, and an anonymous\nsession to give. With no anonymous session it moves nothing and says so.",
+        "operationId": "claim_research_v1_research_claim_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnershipClaimOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Research",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/research/{session_id}": {
+      "delete": {
+        "description": "Delete research and everything produced for it (`REQ-SEC-008`, `DEC-18`).\n\nHidden and stopped in this request, its files removed from storage, and its\nrows purged by the worker's sweep once no step can still be writing them.\n\n**Idempotent, and silent about what it could not find.** Research that is\nalready gone and research that was never this caller's both answer 204:\na 404 for one and not the other would let a guessed id be tested for\nexistence (`REQ-SEC-009`).",
+        "operationId": "delete_research_session_v1_research__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Session"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Research Session",
+        "tags": [
+          "research"
+        ]
+      },
       "get": {
         "description": "The session header the workspace renders around (`REQ-WORK-002`).",
         "operationId": "get_research_v1_research__session_id__get",
@@ -1295,6 +1912,22 @@
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
             }
           },
           {
@@ -1370,6 +2003,22 @@
           },
           {
             "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
             "name": "scrapr_session",
             "required": false,
             "schema": {
@@ -1426,6 +2075,22 @@
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
             }
           },
           {
@@ -1488,6 +2153,22 @@
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
             }
           },
           {
@@ -1562,6 +2243,22 @@
           },
           {
             "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
             "name": "scrapr_session",
             "required": false,
             "schema": {
@@ -1618,6 +2315,22 @@
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
             }
           },
           {
@@ -1680,6 +2393,22 @@
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
             }
           },
           {
@@ -1764,6 +2493,22 @@
           },
           {
             "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
+            }
+          },
+          {
+            "in": "cookie",
             "name": "scrapr_session",
             "required": false,
             "schema": {
@@ -1823,6 +2568,22 @@
               "format": "uuid",
               "title": "Upload Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
             }
           },
           {
@@ -1892,6 +2653,22 @@
             "schema": {
               "title": "Version Number",
               "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "scrapr_account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scrapr Account"
             }
           },
           {

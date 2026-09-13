@@ -291,6 +291,72 @@ export async function deleteUpload(
   }
 }
 
+/* -------------------------------------------------------------------------
+ * Accounts and history (`REQ-AUTH-003..005`, `DEC-16`, `DEC-17`)
+ * ---------------------------------------------------------------------- */
+
+export type Account = Schemas["AccountOut"];
+export type AuthResult = Schemas["AuthOut"];
+export type HistoryItem = Schemas["HistoryItemOut"];
+
+/**
+ * Create an account. The server also moves this browser's anonymous research
+ * into it, and `claimed` says how many sessions came along.
+ */
+export function signUp(email: string, password: string): Promise<AuthResult> {
+  return request<AuthResult>("/v1/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+/** Sign in, bringing along any research done on this browser while signed out. */
+export function signIn(email: string, password: string): Promise<AuthResult> {
+  return request<AuthResult>("/v1/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+/** Sign out. Revoked on the server, not only forgotten by the browser. */
+export async function signOut(): Promise<void> {
+  await fetch(`${API_BASE_URL}/v1/auth/signout`, {
+    method: "POST",
+    credentials: "include",
+  });
+}
+
+/** Who this browser is signed in as. `null` is the ordinary answer, not an error. */
+export async function getAccount(): Promise<Account | null> {
+  const state = await request<Schemas["SessionStateOut"]>("/v1/auth/session");
+  return state.account ?? null;
+}
+
+/** The signed-in account's saved research, most recently updated first. */
+export function listHistory(): Promise<HistoryItem[]> {
+  return request<HistoryItem[]>("/v1/me/research");
+}
+
+/**
+ * Delete research and everything produced for it (`REQ-SEC-008`, `DEC-18`).
+ *
+ * Idempotent on the server: deleting what is already gone succeeds.
+ */
+export async function deleteResearch(sessionId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/v1/research/${sessionId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      "delete_failed",
+      "That research could not be deleted. Try again in a moment.",
+    );
+  }
+}
+
 /**
  * Enqueue the run for a session created with `defer_start`.
  *

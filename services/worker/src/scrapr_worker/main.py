@@ -27,10 +27,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import signal
 import sys
+from collections.abc import Callable
 from dataclasses import replace
-from functools import lru_cache
+from functools import lru_cache, partial
 from types import FrameType
 
 import anthropic
@@ -39,6 +41,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from scrapr_core.config import Settings, get_settings
 from scrapr_core.db.engine import build_engine, build_session_factory
 from scrapr_core.jobs import JobRunner
+from scrapr_core.lifecycle import PurgeReport, purge
 from scrapr_core.llm.anthropic_provider import DEFAULT_PROFILES, AnthropicProvider
 from scrapr_core.llm.contract import LLMProvider, ModelTier
 from scrapr_core.llm.scripted import ScriptedProvider
@@ -52,6 +55,7 @@ __all__ = [
     "build_provider",
     "build_registry",
     "build_runner",
+    "build_sweeper",
     "main",
 ]
 
@@ -64,6 +68,10 @@ Polling, not notification, on purpose: `LISTEN`/`NOTIFY` would tie the worker to
 a long-lived connection, and that is exactly the constraint `OPEN-03` has not
 resolved. A second of latency on a job that takes minutes is not the bottleneck.
 """
+
+SWEEP_INTERVAL_SECONDS = 300.0
+"""How often the deletion sweep runs (`DEC-18`). Five minutes against a
+twenty-minute grace period puts every deleted row gone within half an hour."""
 
 
 def build_provider(settings: Settings) -> LLMProvider:
@@ -158,10 +166,19 @@ def build_runner(worker_id: str) -> JobRunner:
     )
 
 
+def build_sweeper(
+    settings: Settings, session_factory: sessionmaker[Session]
+) -> Callable[[], PurgeReport]:
+    """The deletion sweep (`DEC-17`, `DEC-18`), bound to this worker's wiring."""
+    store = ObjectStore(settings)
+    return partial(purge, session_factory, store)
+
+
 async def run_forever(
     runner: JobRunner,
     stopping: asyncio.Event,
     processor: DocumentProcessor | None = None,
+    sweeper: Callable[[], PurgeReport] | None = None,
 ) -> None:
     """Poll for work until asked to stop.
 
@@ -175,8 +192,21 @@ async def run_forever(
     category is skipped for a session with nothing `ready` — the file would be
     silently absent from a report it should have informed.
     """
+    last_sweep = -math.inf
+    loop = asyncio.get_running_loop()
+
     while not stopping.is_set():
         did_work = False
+
+        if sweeper is not None and loop.time() - last_sweep >= SWEEP_INTERVAL_SECONDS:
+            last_sweep = loop.time()
+            try:
+                await asyncio.to_thread(sweeper)
+            except Exception:
+                # A failed sweep is retried next interval. It must never stop
+                # research: deletion is late, not lost, and the rows it would
+                # have removed are already invisible to every reader.
+                logger.exception("the purge sweep failed; retrying next interval")
 
         if processor is not None:
             # Off the event loop: extraction parses a PDF, which is CPU-bound
@@ -193,8 +223,19 @@ async def run_forever(
                     else f"failed ({processed.reason})",
                 )
 
-        if await runner.run_one():
-            did_work = True
+        try:
+            if await runner.run_one():
+                did_work = True
+        except Exception:
+            # The runner already converts a handler's failure into a retry. What
+            # reaches here failed around the handler — typically a commit racing
+            # a purge of research its owner deleted. The step's lease expires and
+            # it is reclaimed or found dead; the worker itself carries on.
+            #
+            # Not counted as work, so the loop waits before trying again. A
+            # failure that repeats — the database gone, say — would otherwise
+            # spin this loop as fast as it can raise, never yielding.
+            logger.exception("a step could not be recorded; its lease will expire")
 
         if not did_work:
             try:
@@ -212,9 +253,16 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
+    problems = settings.production_problems()
+    if problems:
+        # `REQ-SEC-007 AC-3`: refuse, with every reason, before touching work.
+        logger.error("refusing to start: %s", "; ".join(problems))
+        return 1
+
     worker_id = f"worker-{settings.scrapr_env}"
     runner = build_runner(worker_id)
     processor = build_processor(settings, get_session_factory())
+    sweeper = build_sweeper(settings, get_session_factory())
     stopping = asyncio.Event()
 
     def _stop(signum: int, frame: FrameType | None) -> None:
@@ -225,7 +273,7 @@ def main() -> int:
         signal.signal(received, _stop)
 
     logger.info("worker %s polling for steps and uploads", worker_id)
-    asyncio.run(run_forever(runner, stopping, processor))
+    asyncio.run(run_forever(runner, stopping, processor, sweeper))
     logger.info("worker %s stopped", worker_id)
     return 0
 

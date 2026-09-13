@@ -8,6 +8,11 @@ themselves — they pass the context in — so the cross-account test suite
 
 from __future__ import annotations
 
+from scrapr_core.db.repositories.accounts import (
+    AccountRepository,
+    EmailTakenError,
+    IssuedAccountSession,
+)
 from scrapr_core.db.repositories.activity import ActivityRepository
 from scrapr_core.db.repositories.anonymous_sessions import (
     AnonymousSessionRepository,
@@ -26,10 +31,13 @@ from scrapr_core.db.repositories.uploads import (
 )
 
 __all__ = [
+    "AccountRepository",
     "ActivityRepository",
     "AnonymousSessionRepository",
     "ConversationRepository",
+    "EmailTakenError",
     "EvidenceRepository",
+    "IssuedAccountSession",
     "IssuedSession",
     "LimitBreach",
     "QuestionCoverage",

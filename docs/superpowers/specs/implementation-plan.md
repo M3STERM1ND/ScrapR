@@ -889,7 +889,7 @@ A: upload processing, extraction, chunking, document tool, contradiction detecti
 B: upload UI, processing states, document citation treatment.
 
 ### Phase 5 — Accounts & Persistence
-**Blocked by:** `OPEN-11`, `OPEN-17`, `OPEN-24`.
+**Blocked by:** nothing. `OPEN-11` closed by `DEC-16`, `OPEN-17` by `DEC-17`, `OPEN-24` by `DEC-18` (`docs/decisions/OPEN-11-17-24.md`). `POST /v1/auth/*` in §6.1 is now `signup`, `signin`, `signout` and `GET /v1/auth/session`.
 
 B: auth, account creation, claiming, history, deletion UI.
 A: deletion semantics, cascade behaviour, cross-account isolation test suite (`REQ-SEC-002 AC-3`).

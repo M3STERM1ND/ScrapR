@@ -64,6 +64,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    trust_proxy_headers: bool = Field(
+        default=False,
+        alias="TRUST_PROXY_HEADERS",
+        description=(
+            "Read the client address from X-Forwarded-For. True only behind a "
+            "proxy that sets it (Vercel does); otherwise any client could name "
+            "a fresh address per request and escape every rate limit."
+        ),
+    )
+
     # ------------------------------------------------------------------
     # AI provider — `DEC-06`, closing `OPEN-04`
     # ------------------------------------------------------------------
@@ -134,6 +144,34 @@ class Settings(BaseSettings):
     """Deliberately less than `max_upload_bytes` times the count: the per-file
     limit is what one document plausibly is, the session limit is what will be
     processed for one run (`DEC-13`)."""
+
+    def production_problems(self) -> list[str]:
+        """What in this configuration would break a production guarantee.
+
+        `REQ-SEC-003`: storage retrieval and the browser's origin are over TLS.
+        `REQ-SEC-004` asks for encryption at rest, which is the database and
+        storage providers' property rather than something a URL can prove — but
+        a database connection that does not insist on TLS carries the data in
+        the clear on its way there, and that *is* checkable.
+
+        Empty outside production. Returned as a list, not raised, so a caller
+        can report every problem at once rather than one per deploy.
+        """
+        if self.scrapr_env != "production":
+            return []
+
+        problems: list[str] = []
+        if self.storage_endpoint_url and not self.storage_endpoint_url.startswith("https://"):
+            problems.append("STORAGE_ENDPOINT_URL must use https:// in production")
+        if any(not origin.startswith("https://") for origin in self.allowed_origins):
+            problems.append("every WEB_ORIGINS entry must use https:// in production")
+        if not any(
+            f"sslmode={mode}" in self.database_url for mode in ("require", "verify-ca", "verify-full")
+        ):
+            problems.append("DATABASE_URL must set sslmode=require (or stricter) in production")
+        if "local_dev_only" in self.storage_secret_key or "local_dev_only" in self.database_url:
+            problems.append("the docker-compose development credentials must not reach production")
+        return problems
 
     @property
     def has_ai_provider(self) -> bool:

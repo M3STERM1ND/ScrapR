@@ -47,6 +47,8 @@ class ResearchSession(Base):
             text("updated_at DESC"),
         ),
         Index("ix_research_sessions_anonymous_session_id", "anonymous_session_id"),
+        # The purge finds deleted research by when it was deleted (`DEC-18`).
+        Index("ix_research_sessions_deleted_at", "deleted_at"),
     )
 
     id: Mapped[UuidPk]
@@ -89,8 +91,12 @@ class ResearchSession(Base):
     updated_at: Mapped[CreatedAt] = mapped_column(onupdate=utcnow)
 
     deleted_at: Mapped[dt.datetime | None]
-    """Deletion semantics — soft or hard, and what happens to children — are
-    `OPEN-24`. The column exists so the answer is not a migration."""
+    """When the owner deleted this research, or its anonymous session expired.
+
+    `DEC-18`: set in the request, which hides the session from every read at
+    once; the purge then hard-deletes every row beneath it once no worker can
+    still hold one of its steps. It is a tombstone with a short life, not a
+    retention window."""
 
 
 class ResearchVersion(Base):

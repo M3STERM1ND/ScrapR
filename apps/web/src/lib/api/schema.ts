@@ -25,6 +25,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session State
+         * @description Who this browser is signed in as. Never a 401.
+         */
+        get: operations["get_session_state_v1_auth_session_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/signin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign In
+         * @description Sign in, and bring this browser's anonymous research into the account.
+         */
+        post: operations["sign_in_v1_auth_signin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/signout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign Out
+         * @description Revoke this browser's account session. Idempotent.
+         *
+         *     Revoked in the database, not only cleared in the browser: a copy of the
+         *     cookie taken before sign-out must stop working too.
+         */
+        post: operations["sign_out_v1_auth_signout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign Up
+         * @description Create an account, sign this browser in, and bring its research along.
+         */
+        post: operations["sign_up_v1_auth_signup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/research": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List History
+         * @description The account's research, most recently updated first.
+         */
+        get: operations["list_history_v1_me_research_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/research": {
         parameters: {
             query?: never;
@@ -49,6 +152,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/research/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim Research
+         * @description Attach this browser's anonymous research to the signed-in account.
+         *
+         *     For a visitor who researched while signed out and is already signed in on
+         *     this browser. Needs both halves: an account to receive, and an anonymous
+         *     session to give. With no anonymous session it moves nothing and says so.
+         */
+        post: operations["claim_research_v1_research_claim_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/research/{session_id}": {
         parameters: {
             query?: never;
@@ -63,7 +190,19 @@ export interface paths {
         get: operations["get_research_v1_research__session_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Research Session
+         * @description Delete research and everything produced for it (`REQ-SEC-008`, `DEC-18`).
+         *
+         *     Hidden and stopped in this request, its files removed from storage, and its
+         *     rows purged by the worker's sweep once no step can still be writing them.
+         *
+         *     **Idempotent, and silent about what it could not find.** Research that is
+         *     already gone and research that was never this caller's both answer 204:
+         *     a 404 for one and not the other would let a guessed id be tested for
+         *     existence (`REQ-SEC-009`).
+         */
+        delete: operations["delete_research_session_v1_research__session_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -266,6 +405,19 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AccountOut
+         * @description The signed-in account, as the account itself may see it.
+         */
+        AccountOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email: string;
+        };
+        /**
          * ActivityEventOut
          * @description One timeline entry. User-facing text only (`REQ-ACT-003`).
          */
@@ -324,6 +476,15 @@ export interface components {
             question: components["schemas"]["MessageOut"];
             /** Researched */
             researched: boolean;
+        };
+        /**
+         * AuthOut
+         * @description The outcome of signing up or signing in.
+         */
+        AuthOut: {
+            account: components["schemas"]["AccountOut"];
+            /** Claimed */
+            claimed: number;
         };
         /**
          * AuthorityTier
@@ -474,6 +635,20 @@ export interface components {
             version_number: number;
         };
         /**
+         * CredentialsIn
+         * @description An email and password, for signing up or signing in.
+         *
+         *     Bounds here are only what keeps the request sane. The password rule
+         *     itself (`DEC-16`) is checked by the route, so a too-short password gets a
+         *     message saying what the rule is rather than a generic validation failure.
+         */
+        CredentialsIn: {
+            /** Email */
+            email: string;
+            /** Password */
+            password: string;
+        };
+        /**
          * EvidenceOut
          * @description One piece of evidence behind a claim, as the inspector shows it.
          *
@@ -511,6 +686,34 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * HistoryItemOut
+         * @description One saved research session in the history list (`REQ-AUTH-005 AC-1`).
+         */
+        HistoryItemOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Objective */
+            objective: string;
+            status: components["schemas"]["ResearchStatus"];
+            /** Subject */
+            subject: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version Count */
+            version_count: number;
+        };
+        /**
          * MessageOut
          * @description One conversation turn (`REQ-CONV-007`).
          */
@@ -540,6 +743,15 @@ export interface components {
          * @enum {string}
          */
         MessageRole: "user" | "agent";
+        /**
+         * OwnershipClaimOut
+         * @description What claiming anonymous research moved (`REQ-AUTH-004`). Not to be
+         *     confused with `ClaimOut`, an assertion in a report.
+         */
+        OwnershipClaimOut: {
+            /** Claimed */
+            claimed: number;
+        };
         /**
          * ResearchSessionOut
          * @description The session header the workspace renders around (`REQ-WORK-002`).
@@ -598,6 +810,16 @@ export interface components {
             title: string;
         };
         /**
+         * SessionStateOut
+         * @description Who this browser is signed in as, if anyone.
+         *
+         *     A 200 with `account: null` rather than a 401, because "not signed in" is
+         *     the ordinary state of most visitors and not an error to log in a console.
+         */
+        SessionStateOut: {
+            account: components["schemas"]["AccountOut"] | null;
+        };
+        /**
          * SourceCategory
          * @description Which tool category produced the source (`REQ-TOOL-002..007`).
          * @enum {string}
@@ -613,6 +835,11 @@ export interface components {
         SourceOut: {
             authority_tier: components["schemas"]["AuthorityTier"];
             category: components["schemas"]["SourceCategory"];
+            /**
+             * Document Removed
+             * @default false
+             */
+            document_removed: boolean;
             /**
              * Id
              * Format: uuid
@@ -847,12 +1074,169 @@ export interface operations {
             };
         };
     };
+    get_session_state_v1_auth_session_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionStateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sign_in_v1_auth_signin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sign_out_v1_auth_signout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    sign_up_v1_auth_signup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_history_v1_me_research_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_research_v1_research_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -882,6 +1266,38 @@ export interface operations {
             };
         };
     };
+    claim_research_v1_research_claim_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnershipClaimOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_research_v1_research__session_id__get: {
         parameters: {
             query?: never;
@@ -890,6 +1306,7 @@ export interface operations {
                 session_id: string;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -915,6 +1332,38 @@ export interface operations {
             };
         };
     };
+    delete_research_session_v1_research__session_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_activity_v1_research__session_id__activity_get: {
         parameters: {
             query?: {
@@ -925,6 +1374,7 @@ export interface operations {
                 session_id: string;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -958,6 +1408,7 @@ export interface operations {
                 session_id: string;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -991,6 +1442,7 @@ export interface operations {
                 session_id: string;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -1028,6 +1480,7 @@ export interface operations {
                 session_id: string;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -1061,6 +1514,7 @@ export interface operations {
                 session_id: string;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -1094,6 +1548,7 @@ export interface operations {
                 session_id: string;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -1132,6 +1587,7 @@ export interface operations {
                 upload_id: string;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -1164,6 +1620,7 @@ export interface operations {
                 upload_id: string;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };
@@ -1198,6 +1655,7 @@ export interface operations {
                 version_number: number;
             };
             cookie?: {
+                scrapr_account?: string | null;
                 scrapr_session?: string | null;
             };
         };

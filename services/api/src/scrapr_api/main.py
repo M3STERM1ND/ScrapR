@@ -16,7 +16,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from scrapr_api.errors import install_error_handlers
-from scrapr_api.routers import research, uploads
+from scrapr_api.routers import auth, history, research, uploads
+from scrapr_api.security import install_security_headers
 from scrapr_core.config import get_settings
 
 __all__ = ["create_app"]
@@ -34,6 +35,12 @@ def create_app() -> FastAPI:
     without importing global state and so nothing connects to a database at
     import time.
     """
+    # `REQ-SEC-007 AC-3`: a production process with an unsafe configuration
+    # refuses to start, and says every reason at once.
+    problems = get_settings().production_problems()
+    if problems:
+        raise RuntimeError("refusing to start: " + "; ".join(problems))
+
     app = FastAPI(
         title="ScrapR",
         description=DESCRIPTION,
@@ -59,8 +66,14 @@ def create_app() -> FastAPI:
     )
 
     install_error_handlers(app)
+    install_security_headers(app)
+    app.include_router(auth.router)
+    # Before the research router, so `/v1/research/claim` is matched as the
+    # claim route and never mistaken for a session id.
+    app.include_router(auth.claim_router)
     app.include_router(research.router)
     app.include_router(uploads.router)
+    app.include_router(history.router)
 
     @app.get("/health", tags=["meta"])
     def health() -> dict[str, str]:

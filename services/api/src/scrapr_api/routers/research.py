@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from scrapr_api.deps import CurrentOwner, DbSession, OwnerOrNew, Research
 from scrapr_api.errors import ApiError
+from scrapr_api.routers.uploads import get_object_store
 from scrapr_api.schemas import (
     ActivityEventOut,
     ActivityPage,
@@ -52,6 +53,7 @@ from scrapr_core.db.models import (
     ReportSection,
     ResearchSession,
     Source,
+    Upload,
     Visualization,
     VisualizationEvidence,
 )
@@ -61,6 +63,7 @@ from scrapr_core.db.repositories import (
     ResearchRepository,
     RunRepository,
 )
+from scrapr_core.lifecycle import delete_research
 from scrapr_core.orchestrator.converse import (
     ConversationContext,
     EvidenceRef,
@@ -188,6 +191,29 @@ def get_research(session_id: UUID, research: Research) -> ResearchSessionOut:
     )
 
 
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_research_session(
+    session_id: UUID,
+    research: Research,
+    session: DbSession,
+) -> None:
+    """Delete research and everything produced for it (`REQ-SEC-008`, `DEC-18`).
+
+    Hidden and stopped in this request, its files removed from storage, and its
+    rows purged by the worker's sweep once no step can still be writing them.
+
+    **Idempotent, and silent about what it could not find.** Research that is
+    already gone and research that was never this caller's both answer 204:
+    a 404 for one and not the other would let a guessed id be tested for
+    existence (`REQ-SEC-009`).
+    """
+    found = research.get_session(session_id)
+    if found is None:
+        return
+
+    delete_research(session, found, get_object_store())
+
+
 @router.get("/{session_id}/versions/{version_number}")
 def get_version(
     session_id: UUID,
@@ -220,6 +246,19 @@ def get_version(
         session.execute(select(Source).where(Source.version_id == version.id))
         .scalars()
         .all()
+    )
+    # Which cited documents have been deleted since (`REQ-AUTH-008 AC-3`).
+    upload_ids = {source.upload_id for source in sources if source.upload_id}
+    removed_uploads: set[UUID] = (
+        set(
+            session.execute(
+                select(Upload.id).where(
+                    Upload.id.in_(upload_ids), Upload.deleted_at.is_not(None)
+                )
+            ).scalars()
+        )
+        if upload_ids
+        else set()
     )
 
     # The citation map: claim id -> the sources behind its supporting evidence.
@@ -366,6 +405,7 @@ def get_version(
                 # reader's own file apart from an unlinkable web result.
                 category=source.category,
                 upload_id=source.upload_id,
+                document_removed=source.upload_id in removed_uploads,
             )
             for source in sources
         ],

@@ -1,8 +1,12 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { DeleteResearch } from "@/components/account/DeleteResearch";
 import { ActivityTimeline } from "@/components/activity/ActivityTimeline";
+import { useAccount } from "@/lib/useAccount";
 import { AttachedDocuments } from "./AttachedDocuments";
 import { ConversationPanel } from "@/components/conversation/ConversationPanel";
 import { ReportView } from "@/components/report/ReportView";
@@ -46,6 +50,7 @@ type Props = {
 };
 
 export function Workspace({ sessionId }: Props) {
+  const router = useRouter();
   const [session, setSession] = useState<ResearchSession | null>(null);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [version, setVersion] = useState<Version | null>(null);
@@ -155,6 +160,16 @@ export function Workspace({ sessionId }: Props) {
         ) : null}
 
         {session ? <ShortfallNotice status={session.status} /> : null}
+
+        {session ? (
+          <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
+            <SaveToAccount sessionId={sessionId} />
+            <DeleteResearch
+              sessionId={sessionId}
+              onDeleted={() => router.push("/research/new")}
+            />
+          </div>
+        ) : null}
       </header>
 
       <div className="hairline mt-10" />
@@ -220,6 +235,34 @@ function ShortfallNotice({ status }: { status: ResearchSession["status"] }) {
       {status === "partial"
         ? "Parts of this question could not be answered. What is missing is marked in the report, and nothing has been filled in with guesswork."
         : "This research could not be completed. Nothing below should be read as a finding."}
+    </p>
+  );
+}
+
+/**
+ * Offers an account from inside the research (`REQ-AUTH-003 AC-1`).
+ *
+ * Only to a visitor who is not signed in, and only as an offer: the research is
+ * already fully usable, and the line says what an account adds rather than
+ * implying anything is at risk without one. Signing up from here brings this
+ * research into the account and returns the reader to it (`DEC-17`).
+ */
+function SaveToAccount({ sessionId }: { sessionId: string }) {
+  const account = useAccount();
+
+  // Nothing while asking, and nothing to a reader who already has an account.
+  if (account !== null) return null;
+
+  const next = encodeURIComponent(`/research/${sessionId}`);
+  return (
+    <p className="text-micro text-ink-muted">
+      <Link
+        href={`/signup?next=${next}`}
+        className="font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ochre-deep"
+      >
+        Save to an account
+      </Link>{" "}
+      to come back to this research, its versions and conversation later.
     </p>
   );
 }

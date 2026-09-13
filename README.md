@@ -2,19 +2,17 @@
 
 Turns a question into an evidence-backed report with sources, analysis, charts and follow-up.
 
-**Status: Phase 1 complete.** One query becomes a source-backed report.
+**Status: Phase 5 complete.** Research without an account, save it to one, and
+come back to it.
 
 Ask a question at `/research/new`, watch the activity timeline fill in as the
-worker executes the steps, and read the report that comes back with citations
-and retrieval dates. The pipeline interprets the objective, plans research
-areas, retrieves against real providers, extracts evidence with verbatim
-excerpts checked against their source, decides sufficiency by question
-coverage, and writes a validated report that states what it could not
-establish.
+worker executes the steps, and read the report that comes back with citations,
+retrieval dates, confidence, conflicts, charts and a conversation panel. Attach
+documents and they join the evidence. Create an account from inside the research
+and it comes with you; sign in later and it is in saved research, with its
+versions and conversation. Delete it and it is gone, files and all.
 
-Phase 2 (Evidence & Trust) is unblocked: `DEC-08`, `DEC-09` and `DEC-10` close
-the three questions that gated it. See
-`docs/superpowers/specs/implementation-plan.md` §13 for the phase plan and
+See `docs/superpowers/specs/implementation-plan.md` §13 for the phase plan and
 `docs/decisions/` for resolved open questions.
 
 ---
@@ -38,6 +36,7 @@ packages/scrapr_core/ all Python domain logic
   jobs/               the durable step runner
   orchestrator/       the four-step research pipeline
   synthesis/          the validation gate
+  lifecycle/          deletion, expiry and the purge sweep
 packages/contracts/   openapi.json, generated from the API
 docs/                 specs and decision records
 design-system/        MASTER.md, the landing visual system
@@ -149,6 +148,22 @@ Reading `.text` is the single deliberate escape hatch, and it is meant to be
 greppable so review can find every place untrusted content enters ordinary code.
 Instructions are `Trusted`. The two never meet except as separate parameters to
 `LLMProvider.complete_structured`. See `packages/scrapr_core/src/scrapr_core/security/trust.py`.
+
+**Two cookies, one precedence.** `scrapr_account` (a signed-in account) outranks
+`scrapr_session` (an anonymous visitor). Both are opaque `HttpOnly` tokens stored
+only as hashes. Signing up or in claims the anonymous session's research into
+the account (`DEC-17`). A new route that takes a research id fails
+`services/api/tests/test_isolation.py` until it is given a cross-account probe.
+
+**The request's database session commits before the response is sent.**
+`DbSession` is `Depends(..., scope="function")`. FastAPI's default runs a `yield`
+dependency's teardown after the response, which once let a browser sign up and
+immediately read a database without its new session.
+
+**Deletion is hard and happens in two halves** (`DEC-18`). The request hides the
+research, stops its runs and removes its files; the worker's purge sweep
+(`scrapr_core.lifecycle.purge`) removes the rows twenty minutes later, once no
+step can still be writing them.
 
 **Ownership lives in repositories, never in handlers.** Every repository takes
 an `OwnerContext` and every query filters on it, so the cross-account test suite

@@ -23,6 +23,7 @@ import pytest
 
 import scrapr_worker.main as worker
 from scrapr_core.config import Settings
+from scrapr_core.lifecycle import PurgeReport
 from scrapr_core.llm.anthropic_provider import AnthropicProvider
 from scrapr_core.llm.scripted import ScriptedProvider
 from scrapr_core.orchestrator.pipeline import STAGES
@@ -322,3 +323,65 @@ async def test_the_loop_still_runs_without_a_processor() -> None:
     await asyncio.gather(worker.run_forever(runner, stopping), stop_soon())  # type: ignore[arg-type]
 
     assert runner.calls >= 1
+
+
+async def test_the_loop_sweeps_deleted_research_once_per_interval() -> None:
+    """`DEC-18`: the purge runs from the worker, and not on every tick."""
+    runner = _StubRunner()
+    sweeps: list[int] = []
+    stopping = asyncio.Event()
+
+    def sweep() -> PurgeReport:
+        sweeps.append(1)
+        return PurgeReport()
+
+    async def stop_soon() -> None:
+        await asyncio.sleep(0.05)
+        stopping.set()
+
+    await asyncio.gather(
+        worker.run_forever(runner, stopping, None, sweep),  # type: ignore[arg-type]
+        stop_soon(),
+    )
+
+    assert sweeps == [1]
+
+
+class _ExplodingRunner:
+    """A runner whose step commit fails, as one racing a purge would."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run_one(self) -> bool:
+        self.calls += 1
+        raise RuntimeError("foreign key violation on commit")
+
+
+async def test_a_failure_around_a_step_does_not_stop_the_worker() -> None:
+    """One step that cannot be recorded must not take every other run down with it."""
+    runner = _ExplodingRunner()
+    sweeper_failures: list[int] = []
+    stopping = asyncio.Event()
+
+    def failing_sweep() -> None:
+        sweeper_failures.append(1)
+        raise RuntimeError("database unavailable")
+
+    async def stop_soon() -> None:
+        await asyncio.sleep(0.05)
+        stopping.set()
+
+    # Completing at all is the assertion: an exception escaping `run_forever`
+    # would fail the gather, and a loop spinning on the failure without
+    # yielding would never let `stop_soon` run.
+    await asyncio.wait_for(
+        asyncio.gather(
+            worker.run_forever(runner, stopping, None, failing_sweep),  # type: ignore[arg-type]
+            stop_soon(),
+        ),
+        timeout=5,
+    )
+
+    assert runner.calls >= 1
+    assert sweeper_failures == [1]

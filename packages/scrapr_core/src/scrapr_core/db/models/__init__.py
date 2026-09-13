@@ -15,7 +15,8 @@ from scrapr_core.db.models.conversation import ConversationMessage, MessageEvide
 from scrapr_core.db.models.documents import Upload, UploadChunk
 from scrapr_core.db.models.evidence import Evidence, Source
 from scrapr_core.db.models.exports import Export
-from scrapr_core.db.models.identity import AnonymousSession, User
+from scrapr_core.db.models.identity import AnonymousSession, User, UserSession
+from scrapr_core.db.models.limits import RateLimitCounter
 from scrapr_core.db.models.questions import (
     QuestionEvidence,
     QuestionState,
@@ -39,6 +40,7 @@ __all__ = [
     "MessageEvidence",
     "QuestionEvidence",
     "QuestionState",
+    "RateLimitCounter",
     "ReportSection",
     "ResearchQuestion",
     "ResearchRun",
@@ -50,6 +52,7 @@ __all__ = [
     "Upload",
     "UploadChunk",
     "User",
+    "UserSession",
     "Visualization",
     "VisualizationEvidence",
 ]

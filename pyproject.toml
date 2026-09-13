@@ -66,7 +66,11 @@ ignore = [
 known-first-party = ["scrapr_core", "scrapr_api", "scrapr_worker"]
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["S101"]        # assert is the point of a test
+"**/tests/**" = [
+    "S101",  # assert is the point of a test
+    "S105",  # fixture passwords for throwaway test accounts are not secrets
+    "S106",
+]
 "**/conftest.py" = ["S101"]
 
 # ---------------------------------------------------------------------------

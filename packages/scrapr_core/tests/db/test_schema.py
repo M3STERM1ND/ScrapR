@@ -45,13 +45,16 @@ def table(name: str) -> Table:
 def test_every_table_in_the_plan_exists() -> None:
     """The schema is the whole design, not a first slice of it.
 
-    `research_questions` and `question_evidence` are the two tables added since
-    the baseline. They are `DEC-04`'s only schema consequence: termination is
-    defined as coverage of the planned question set, so the questions cannot
-    live in memory.
+    `research_questions` and `question_evidence` were `DEC-04`'s only schema
+    consequence: termination is defined as coverage of the planned question
+    set, so the questions cannot live in memory. `user_sessions` and
+    `rate_limit_counters` are `DEC-16`'s: server-side account sessions, and
+    limits that hold across every API instance.
     """
     assert ALL_TABLES == {
         "users",
+        "user_sessions",
+        "rate_limit_counters",
         "anonymous_sessions",
         "research_sessions",
         "research_versions",

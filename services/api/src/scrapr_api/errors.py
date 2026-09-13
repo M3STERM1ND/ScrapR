@@ -51,17 +51,29 @@ class ApiError(Exception):
     one line without inventing a response shape.
     """
 
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.headers = headers or {}
+        """Protocol headers only — `Retry-After`, never diagnostic detail."""
 
 
-def _envelope(status_code: int, code: str, message: str) -> JSONResponse:
+def _envelope(
+    status_code: int, code: str, message: str, headers: dict[str, str] | None = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content=ErrorEnvelope(error=ErrorBody(code=code, message=message)).model_dump(),
+        headers=headers,
     )
 
 
@@ -70,7 +82,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ApiError)
     async def _api_error(request: Request, exc: ApiError) -> JSONResponse:
-        return _envelope(exc.status_code, exc.code, exc.message)
+        return _envelope(exc.status_code, exc.code, exc.message, exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(

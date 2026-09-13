@@ -21,10 +21,20 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 __all__ = ["ApiError", "ErrorBody", "ErrorEnvelope", "install_error_handlers"]
 
 logger = logging.getLogger(__name__)
+
+FRAMEWORK_ERRORS: dict[int, tuple[str, str]] = {
+    400: ("invalid_request", "The request could not be understood. Check the required fields."),
+    404: ("not_found", "That could not be found."),
+    405: ("method_not_allowed", "That action is not available here."),
+    413: ("request_too_large", "That request is too large."),
+}
+"""Errors raised by the framework rather than a route: an unknown path, a wrong
+method, a body that would not parse or grew past the cap."""
 
 
 class ErrorBody(BaseModel):
@@ -83,6 +93,15 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(request: Request, exc: ApiError) -> JSONResponse:
         return _envelope(exc.status_code, exc.code, exc.message, exc.headers)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _framework_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        # The default body is `{"detail": ...}`, which the web client cannot
+        # tell from an outage. The detail itself is dropped, not forwarded.
+        code, message = FRAMEWORK_ERRORS.get(
+            exc.status_code, ("request_failed", "The request could not be completed.")
+        )
+        return _envelope(exc.status_code, code, message, dict(exc.headers or {}))
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(

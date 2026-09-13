@@ -192,6 +192,23 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
+  worker-image:
+    name: worker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # `DEC-26` runs the worker as a container; an image that no longer builds
+      # is a deploy that fails, so it fails here first.
+      - run: docker build -f infra/worker.Dockerfile -t scrapr-worker .
+      # With no configuration the image must refuse to start (production is its
+      # default), not run against nothing.
+      - name: The image refuses an unsafe configuration
+        run: |
+          if docker run --rm scrapr-worker; then
+            echo "the worker started without a safe production configuration" >&2
+            exit 1
+          fi
+
   lighthouse:
     name: lighthouse budget
     runs-on: ubuntu-latest

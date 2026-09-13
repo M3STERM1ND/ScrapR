@@ -18,7 +18,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <div className="min-h-dvh bg-paper">
       <header className="sticky top-0 z-50 border-b border-line bg-paper/85 backdrop-blur-md">
         <div className="shell flex h-16 items-center justify-between">
-          <Link href="/" className="rounded-sm" aria-label="ScrapR home">
+          {/* Not prefetched: the landing page carries the animation library,
+              ~50 KB of script a reader in the middle of research rarely needs
+              and the Lighthouse script budget counts. */}
+          <Link href="/" prefetch={false} className="rounded-sm" aria-label="ScrapR home">
             <Logo />
           </Link>
           <AccountMenu />

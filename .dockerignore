@@ -1,0 +1,19 @@
+# The build context for infra/worker.Dockerfile. Secrets and local state never
+# enter an image, even a build stage that is thrown away.
+.git
+.env
+.env.*
+!.env.example
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+.coverage
+.coverage.*
+htmlcov
+apps
+docs
+design-system
+**/tests

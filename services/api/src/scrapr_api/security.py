@@ -16,12 +16,13 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from scrapr_core.config import get_settings
 
-__all__ = ["SECURITY_HEADERS", "install_security_headers"]
+__all__ = ["SECURITY_HEADERS", "BodyLimit", "install_security_headers"]
 
 SECURITY_HEADERS: dict[str, str] = {
     "Cache-Control": "no-store",
@@ -52,9 +53,47 @@ def _refusal(status_code: int, code: str, message: str) -> JSONResponse:
     )
 
 
+class BodyLimit:
+    """Counts a body as it arrives, so one without a `Content-Length` meets the cap too.
+
+    The header check in `install_security_headers` refuses a declared oversize
+    body without reading a byte. A chunked request declares nothing, so without
+    this it would be read and parsed in full. Raised as an `HTTPException`,
+    which FastAPI's body parsing re-raises rather than folding into a 400, and
+    which the error handlers put in the envelope.
+    """
+
+    def __init__(self, app: ASGIApp, max_bytes: int = MAX_BODY_BYTES) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        received = 0
+
+        async def counted() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise HTTPException(status_code=413)
+            return message
+
+        await self.app(scope, counted, send)
+
+
 def install_security_headers(app: FastAPI) -> None:
     """Attach the headers to every response, errors included, and refuse
-    oversized bodies and cross-origin writes before any route runs."""
+    oversized bodies and cross-origin writes before any route runs.
+
+    Install before `CORSMiddleware` is added, so CORS stays outermost and a
+    refusal sent to the web app's own origin is one it can read.
+    """
+    app.add_middleware(BodyLimit)
     settings = get_settings()
     send_hsts = settings.scrapr_env != "local"
     allowed_origins = frozenset(settings.allowed_origins)

@@ -16,6 +16,17 @@ test("the landing page states what the product does", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 });
 
+test("an address nothing answers says so and offers a way on", async ({ page }) => {
+  const response = await page.goto("/no-such-page");
+
+  expect(response?.status()).toBe(404);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "There is nothing at this address" }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Start new research" }).click();
+  await expect(page).toHaveURL(/\/research\/new$/);
+});
+
 test("intake asks one question and refuses an empty one", async ({ page }) => {
   await page.goto("/research/new");
 

@@ -53,6 +53,11 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    install_error_handlers(app)
+    # Before CORS: the middleware added last runs first, and CORS must wrap the
+    # request guards so the web app can read a 413 rather than a network error.
+    install_security_headers(app)
+
     # The web app is served from a different origin in development and may be in
     # production. Credentials are allowed because the anonymous session cookie
     # *is* the authorization; origins are therefore listed explicitly and never
@@ -66,8 +71,6 @@ def create_app() -> FastAPI:
         allow_headers=["content-type"],
     )
 
-    install_error_handlers(app)
-    install_security_headers(app)
     app.include_router(auth.router)
     # Before the research router, so `/v1/research/claim` is matched as the
     # claim route and never mistaken for a session id.

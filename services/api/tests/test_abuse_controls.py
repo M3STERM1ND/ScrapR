@@ -129,6 +129,62 @@ def test_an_oversized_body_is_refused_before_parsing(client: TestClient) -> None
     assert response.json()["error"]["code"] == "request_too_large"
 
 
+def test_a_body_with_no_declared_length_meets_the_same_cap(client: TestClient) -> None:
+    """A chunked request carries no Content-Length, so the header check alone never sees it."""
+
+    def chunks() -> Iterator[bytes]:
+        yield b'{"objective": "'
+        for _ in range(12):
+            yield b"x" * (100 * 1024)
+        yield b'"}'
+
+    response = client.post("/v1/research", content=chunks(), headers={"content-type": "application/json"})
+
+    assert "content-length" not in {name.lower() for name in response.request.headers}
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "request_too_large"
+
+
+def test_a_small_body_with_no_declared_length_is_accepted(client: TestClient) -> None:
+    def chunks() -> Iterator[bytes]:
+        yield b'{"objective": "How is Acme Corp positioned against its competitors?",'
+        yield b' "defer_start": true}'
+
+    response = client.post("/v1/research", content=chunks(), headers={"content-type": "application/json"})
+
+    assert response.status_code == 202
+
+
+def test_a_refusal_is_readable_by_the_web_app(client: TestClient) -> None:
+    """A refusal without CORS headers reaches the browser as a network error, not a message."""
+    response = client.post(
+        "/v1/research",
+        content=b"{" + b" " * (1024 * 1024 + 10) + b"}",
+        headers={"content-type": "application/json", "origin": "http://localhost:3000"},
+    )
+
+    assert response.status_code == 413
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "status", "code"),
+    [
+        ("GET", "/v1/no-such-route", 404, "not_found"),
+        ("PUT", "/v1/research", 405, "method_not_allowed"),
+    ],
+)
+def test_framework_errors_use_the_error_envelope(
+    client: TestClient, method: str, path: str, status: int, code: str
+) -> None:
+    """`REQ-INPUT-006 AC-4`: the web client reads `error.code`; `{"detail": ...}` reads as an outage."""
+    response = client.request(method, path)
+
+    assert response.status_code == status
+    assert response.json() == {"error": {"code": code, "message": response.json()["error"]["message"]}}
+    assert "detail" not in response.json()
+
+
 def test_a_write_from_another_origin_is_refused(client: TestClient) -> None:
     refused = client.post("/v1/research", json=OBJECTIVE, headers={"origin": "https://evil.example"})
     allowed = client.post("/v1/research", json=OBJECTIVE, headers={"origin": "http://localhost:3000"})

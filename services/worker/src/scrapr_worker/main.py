@@ -28,7 +28,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
 import signal
+import socket
 import sys
 from collections.abc import Callable
 from dataclasses import replace
@@ -287,7 +289,8 @@ def main() -> int:
         logger.error("refusing to start: %s", "; ".join(problems))
         return 1
 
-    worker_id = f"worker-{settings.scrapr_env}"
+    # One id per process, so a step's `lease_owner` names the replica holding it.
+    worker_id = f"worker-{settings.scrapr_env}-{socket.gethostname()}-{os.getpid()}"
     runner = build_runner(worker_id)
     processor = build_processor(settings, get_session_factory())
     sweeper = build_sweeper(settings, get_session_factory())

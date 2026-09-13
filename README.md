@@ -219,7 +219,7 @@ The topology is `DEC-03` and `DEC-26`; the limits are `DEC-23` to `DEC-25`.
 |---|---|---|
 | `apps/web` | Vercel | `NEXT_PUBLIC_API_BASE_URL` |
 | `services/api` | Vercel (Python) | `DATABASE_URL` (api role, `sslmode=require`), storage keys, `ANTHROPIC_API_KEY`, `WEB_ORIGINS`, `TRUST_PROXY_HEADERS=true`, `SCRAPR_ENV=production` |
-| `services/worker` | Any container host, one long-lived process per replica | `DATABASE_URL` (worker role), storage keys, `ANTHROPIC_API_KEY`, the data-provider keys, `SCRAPR_ENV=production` |
+| `services/worker` | Any container host, one long-lived process per replica, from `infra/worker.Dockerfile` | `DATABASE_URL` (worker role), storage keys, `ANTHROPIC_API_KEY`, the data-provider keys (the image defaults to `SCRAPR_ENV=production`) |
 | PostgreSQL 17 | A managed provider (`N-01`) | Encryption at rest, backups retained 7 days or fewer (`DEC-18`) |
 | Object storage | Cloudflare R2 (`DEC-12`) | A private bucket |
 
@@ -228,13 +228,24 @@ the worker container host. Both are billing and account decisions.
 
 **Before first deploy:**
 
-1. Create the database roles in `infra/postgres-roles.sql` and run
+1. Put the web app and the API on the same site, for example `scrapr.app` and
+   `api.scrapr.app`, never two unrelated hosts such as two `*.vercel.app`
+   addresses. The session cookies are `SameSite=Lax`, which a browser withholds
+   from cross-site requests, so across sites every call would arrive as a new
+   visitor and every piece of research would read as not found.
+2. Create the database roles in `infra/postgres-roles.sql` and run
    `uv run alembic upgrade head` as `scrapr_owner`.
-2. Give each process only its own credentials. The API refuses to start in
+3. Give the R2 bucket a CORS rule allowing `PUT` with a `content-type` header
+   from the web app's origin, and nothing else. Browsers upload documents
+   straight to storage with a presigned URL (`DEC-12`); MinIO allows any origin
+   locally, R2 allows none until told.
+4. Give each process only its own credentials. The API refuses to start in
    production holding a data-provider key (`REQ-SEC-006`), and both processes
    refuse to start without TLS to the database, storage and browser origin
    (`REQ-SEC-003`).
-3. Scale workers to the concurrency you want; one replica runs one step at a
+5. Build the worker with `docker build -f infra/worker.Dockerfile -t scrapr-worker .`
+   from the repository root. It stops on SIGTERM after the step in hand.
+6. Scale workers to the concurrency you want; one replica runs one step at a
    time, and `TBD-12` is 20 at peak.
 
 **Operating it:** `uv run scrapr-ops report --days 7` prints run outcomes and
@@ -259,4 +270,5 @@ needs real-user monitoring to be measured in production.
 | `docs/decisions/` | one file per resolved open question |
 | `design-system/MASTER.md` | landing visual system |
 | `infra/postgres-roles.sql` | least-privilege database roles for production |
+| `infra/worker.Dockerfile` | the worker container image |
 | `websitedesign.md` | the original landing build brief, not an architecture record |

@@ -154,7 +154,7 @@ scrapr/
 │   └── decisions/                  one file per resolved OPEN-xx
 ├── design-system/
 │   └── MASTER.md                   landing visual system (written)
-├── infra/                          IaC + deploy config (shape pending OPEN-03)
+├── infra/                          deploy config: worker image, database roles (DEC-26)
 └── tests/
     ├── fixtures/cassettes/         recorded tool responses
     └── adversarial/                prompt-injection corpus (REQ-SEC-014 AC-3)

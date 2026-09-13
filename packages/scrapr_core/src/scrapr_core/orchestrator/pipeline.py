@@ -37,10 +37,14 @@ from scrapr_core.db.enums import (
     ActivityStatus,
     ClaimType,
     EvidenceRole,
+    MessageRole,
+    NormalizationStatus,
+    RunKind,
 )
 from scrapr_core.db.models import (
     Claim,
     ClaimEvidence,
+    ConversationMessage,
     Evidence,
     QuestionState,
     ReportSection,
@@ -49,11 +53,14 @@ from scrapr_core.db.models import (
     ResearchVersion,
     RunStep,
     Source,
+    Visualization,
+    VisualizationEvidence,
 )
 from scrapr_core.db.repositories.activity import ActivityRepository
 from scrapr_core.db.repositories.evidence import EvidenceRepository
 from scrapr_core.db.repositories.questions import QuestionRepository
 from scrapr_core.domain.json import JsonMapping
+from scrapr_core.evidence.normalize import classify_metric
 from scrapr_core.evidence.tiering import registrable_host
 from scrapr_core.jobs.contract import StepContext, StepHandler, StepPermanentError
 from scrapr_core.llm.contract import LLMProvider
@@ -82,6 +89,7 @@ from scrapr_core.orchestrator.synthesize import (
     with_area_gaps,
 )
 from scrapr_core.orchestrator.trust import apply_trust
+from scrapr_core.orchestrator.visualize import Chartable, select_visualization
 from scrapr_core.synthesis.validation import validate_version
 from scrapr_core.tools.contract import ToolCategory, ToolFailure
 from scrapr_core.tools.registry import ToolRegistry
@@ -140,7 +148,9 @@ class InterpretHandler:
             version_id=context.run.version_id,
         )
 
-        interpretation = await interpret(_objective_of(research), self.provider)
+        interpretation = await interpret(
+            _objective_of(research, context), self.provider
+        )
 
         # `REQ-AGENT-001 AC-2`: the workspace header shows the subject, and
         # `AC-3` shows how an ambiguous one was read, so both belong on the
@@ -504,6 +514,11 @@ class SynthesizeHandler:
         # state — neither can work on the in-memory draft.
         apply_trust(context.session, version_id)
 
+        # Stage 11. After trust, because a chart of contested values is a
+        # chart of a disagreement, and `REQ-VIZ-004 AC-3` wants that indicated
+        # rather than smoothed over.
+        _persist_visualizations(context, version_id)
+
         report = validate_version(context.session, version_id)
         if not report.passed:
             # A gate failure is a generation defect and never ships
@@ -538,9 +553,42 @@ def _research_session(context: StepContext) -> ResearchSession:
     return research
 
 
-def _objective_of(research: ResearchSession) -> ObjectiveInput:
+def _objective_of(
+    research: ResearchSession, context: StepContext
+) -> ObjectiveInput:
+    """What this run is researching.
+
+    Normally the session's objective. On a **conversation run**
+    (`REQ-CONV-003`) it is the objective *plus* the follow-up that triggered
+    it: "find newer information about hiring" is not a new research project,
+    it is the same subject with one question brought to the front.
+
+    The follow-up is read from the message row already written against this
+    version rather than passed through the run, because it is a user utterance
+    and the conversation table is where those live. It reaches the model as
+    material either way — `ObjectiveInput.as_material` wraps it `Untrusted`,
+    and a question the reader typed is no more trusted than a page a tool
+    fetched.
+    """
+    follow_up = ""
+    if context.run.kind is RunKind.CONVERSATION:
+        found = context.session.execute(
+            select(ConversationMessage)
+            .where(
+                ConversationMessage.version_id == context.run.version_id,
+                ConversationMessage.role == MessageRole.USER,
+            )
+            .order_by(ConversationMessage.seq)
+        ).scalars().first()
+        if found is not None:
+            follow_up = found.content
+
     return ObjectiveInput(
-        objective=research.objective,
+        objective=(
+            f"{research.objective}\n\nFollow-up to answer: {follow_up}"
+            if follow_up
+            else research.objective
+        ),
         instructions=research.instructions,
         context_company=research.context_company,
         context_ticker=research.context_ticker,
@@ -840,3 +888,78 @@ def build_handlers(
         RESEARCH_STAGE: ResearchHandler(provider=provider, registry=registry),
         SYNTHESIZE_STAGE: SynthesizeHandler(provider=provider),
     }
+
+
+def _persist_visualizations(context: StepContext, version_id: UUID) -> None:
+    """Offer each section a chart, and take no for an answer.
+
+    `REQ-VIZ-001 AC-1`: charts appear without the reader asking. `AC-2`: data
+    unsuited to visualization is not forced into one — which is most sections
+    most of the time, and `select_visualization` returning `None` is the normal
+    case rather than a failure.
+
+    Built from the evidence a section's claims already cite, so `REQ-VIZ-002
+    AC-1` holds without a second path to evidence: a point can only exist if a
+    claim in that section was supported by the row it came from.
+    """
+    session = context.session
+
+    sections = (
+        session.execute(
+            select(ReportSection)
+            .where(ReportSection.version_id == version_id)
+            .order_by(ReportSection.ordering)
+        )
+        .scalars()
+        .all()
+    )
+
+    ordering = 0
+    for section in sections:
+        rows = session.execute(
+            select(Evidence)
+            .join(ClaimEvidence, ClaimEvidence.evidence_id == Evidence.id)
+            .join(Claim, Claim.id == ClaimEvidence.claim_id)
+            .where(Claim.section_id == section.id)
+            .order_by(Evidence.period_end, Evidence.extracted_at)
+        ).all()
+
+        chartable = [
+            Chartable(
+                evidence_id=evidence.id,
+                # The period is the axis. Evidence without one cannot be placed
+                # in a series, and inventing a position for it would be drawing
+                # a trend out of unordered numbers.
+                label=evidence.period_end.isoformat() if evidence.period_end else "",
+                value=evidence.value_normalized,
+                metric=classify_metric(evidence.content),
+                currency=evidence.currency,
+                comparable=evidence.normalization is NormalizationStatus.NORMALIZED,
+            )
+            for (evidence,) in rows
+        ]
+
+        spec = select_visualization(section.title, chartable)
+        if spec is None:
+            continue
+
+        visualization = Visualization(
+            version_id=version_id,
+            section_id=section.id,
+            kind=spec.kind,
+            spec=spec.as_json(),
+            ordering=ordering,
+        )
+        session.add(visualization)
+        session.flush()
+        ordering += 1
+
+        # `REQ-VIZ-004 AC-1`, `AC-2`: the chart exposes its sources, and all of
+        # them.
+        for evidence_id in spec.evidence_ids:
+            session.add(
+                VisualizationEvidence(
+                    visualization_id=visualization.id, evidence_id=evidence_id
+                )
+            )
+        session.flush()

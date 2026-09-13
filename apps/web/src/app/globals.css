@@ -324,6 +324,16 @@
   color: var(--color-ink-muted);
 }
 
+/* ---- Visualization (`DEC-11`) ---- */
+
+/* A figure, not a card. MASTER.md does most structural work with hairlines,
+   and a chart that arrives in a box reads as a widget bolted onto the report
+   rather than as part of it. */
+@utility viz {
+  border-top: 1px solid var(--color-line);
+  padding-top: 1rem;
+}
+
 /* ---- Citation inspection (`REQ-EVID-019`, `REQ-WORK-006`) ---- */
 
 /* A native `<details>`, so inspection is keyboard reachable and screen-reader

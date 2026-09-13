@@ -41,7 +41,7 @@ from scrapr_api.schemas import (
     VisualizationOut,
 )
 from scrapr_core.config import get_settings
-from scrapr_core.db.enums import ClaimType, MessageRole
+from scrapr_core.db.enums import ClaimType, MessageRole, RunKind
 from scrapr_core.db.models import (
     Claim,
     ClaimEvidence,
@@ -468,42 +468,67 @@ async def ask(
         raise _not_found()
 
     conversation = ConversationRepository(session)
-    question = conversation.append(
-        session_id,
-        version_id,
-        MessageRole.USER,
-        body.question,
-        context_ref=body.context_ref,
-    )
-
     context = _conversation_context(session, found, version_id, conversation)
     provider = build_provider(get_settings())
 
+    # Classified before anything is written, because the answer for a research
+    # question is produced by a different mechanism than the answer for a
+    # question the evidence already covers.
     verdict = await classify_intent(body.question, context, provider)
     researched = verdict.intent is Intent.RESEARCH
 
     if researched:
-        # `REQ-CONV-003` honestly: say what would happen, do not claim it did.
+        # `REQ-CONV-003`: fresh retrieval, run by the pipeline. A new version,
+        # because `REQ-VER-002` makes the current one immutable and adding
+        # evidence to a closed version would break the promise that an answer
+        # stays checkable against what it actually read.
+        next_version = research.open_version(session_id)
+        if next_version is None:
+            raise _not_found()
+
+        # Written against the *new* version, so `_objective_of` finds it when
+        # the interpret step runs and researches the follow-up rather than
+        # re-running the original objective unchanged.
+        question = conversation.append(
+            session_id,
+            next_version.id,
+            MessageRole.USER,
+            body.question,
+            context_ref=body.context_ref,
+        )
+        RunRepository(session).create_run(
+            session_id, next_version.id, STAGES, kind=RunKind.CONVERSATION
+        )
+
         grounded = GroundedAnswer(
             text=(
-                "Answering this needs research beyond what has been gathered. "
-                "Use Update Research to run it, and this question can be "
-                "answered from the new evidence."
+                "The research does not cover this yet, so I have started "
+                "looking. Watch the activity list; the answer will be in the "
+                "report when it finishes."
             ),
             claim_type=ClaimType.UNCERTAINTY,
             evidence_ids=(),
         )
+        answer_version = next_version.id
     else:
+        question = conversation.append(
+            session_id,
+            version_id,
+            MessageRole.USER,
+            body.question,
+            context_ref=body.context_ref,
+        )
         grounded = await answer_question(
             body.question,
             context,
             provider,
             reframe=verdict.intent is Intent.REFRAME,
         )
+        answer_version = version_id
 
     answer = conversation.append(
         session_id,
-        version_id,
+        answer_version,
         MessageRole.AGENT,
         grounded.text,
         evidence_ids=grounded.evidence_ids,

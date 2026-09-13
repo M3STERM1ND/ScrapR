@@ -44,6 +44,8 @@ __all__ = [
     "run_pipeline",
     "scripted_provider",
     "search_tool",
+    "trend_provider",
+    "trend_registry",
 ]
 
 REVENUE_TEXT = "Acme Corp reported revenue of $1.2bn for fiscal 2025, up 18%."
@@ -356,3 +358,82 @@ def estimate_registry() -> ToolRegistry:
     )
     registry.freeze()
     return registry
+
+
+def trend_registry() -> ToolRegistry:
+    """Three periods of the same metric, each dated and sourced.
+
+    The shape a line chart needs: `MIN_POINTS_FOR_SERIES` is three, and each
+    value carries the period that places it on the axis.
+    """
+    registry = ToolRegistry()
+    registry.register(
+        FixtureTool(
+            name="fixture_trend",
+            category=ToolCategory.WEB_SEARCH,
+            items=tuple(
+                fixture_item(
+                    source_name=f"reuters.com FY{year}",
+                    text=f"Acme Corp reported revenue of USD {amount} for fiscal {year}.",
+                    source_url=f"https://reuters.com/acme/fy{year}",
+                    structured={
+                        "period": str(year),
+                        "currency": "USD",
+                        "basis": "reported",
+                    },
+                )
+                for year, amount in (("2023", "0.9bn"), ("2024", "1.2bn"), ("2025", "1.6bn"))
+            ),
+        )
+    )
+    registry.freeze()
+    return registry
+
+
+TREND = (
+    ("2023", "0.9bn"),
+    ("2024", "1.2bn"),
+    ("2025", "1.6bn"),
+)
+
+
+def trend_provider() -> FakeLLMProvider:
+    """Extraction that reads all three dated figures.
+
+    `disputing_provider`'s standing extraction names two specific excerpts, so
+    against a three-period fixture only one grounds and the run produces a
+    single point. A chart test needs the provider to actually read the data the
+    fixture publishes.
+    """
+    provider = FakeLLMProvider(
+        standing_response=Extraction(
+            evidence=[
+                ExtractedEvidence(
+                    statement=(
+                        f"Acme Corp reported revenue of USD {amount} "
+                        f"for fiscal {year}."
+                    ),
+                    excerpt=f"revenue of USD {amount}",
+                    item_index=index,
+                )
+                for index, (year, amount) in enumerate(TREND)
+            ]
+        )
+    )
+    provider.enqueue(
+        Interpretation(
+            subject="Acme Corp",
+            interpretation_note=None,
+            questions=[DISPUTED_QUESTION],
+        ),
+        _PlanDraft(
+            areas=[
+                _PlanDraft.Area(
+                    name="Financial performance",
+                    questions=[DISPUTED_QUESTION],
+                    tool_categories=["web_search"],
+                )
+            ]
+        ),
+    )
+    return provider

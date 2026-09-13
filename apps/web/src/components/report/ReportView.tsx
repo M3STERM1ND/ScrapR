@@ -6,6 +6,8 @@ import type {
   Version,
 } from "@/lib/api/client";
 
+import { Visualization } from "./Visualization";
+
 /**
  * A version, rendered (`REQ-WORK-003..005`).
  *
@@ -124,6 +126,25 @@ export function ReportView({ version }: Props) {
     conflictsByClaim.set(conflict.claim_id, found);
   }
 
+  // Charts belong to a section (`REQ-WORK-005`: the data and visualization
+  // area sits with the section it illustrates, not in a gallery at the end).
+  const chartsBySection = new Map<string, Version["visualizations"]>();
+  for (const viz of version.visualizations) {
+    const found = chartsBySection.get(viz.section_id) ?? [];
+    found.push(viz);
+    chartsBySection.set(viz.section_id, found);
+  }
+
+  // Evidence id to its source, for a chart's provenance line
+  // (`REQ-VIZ-004 AC-1`).
+  const sourceForEvidence = new Map<string, Source>();
+  for (const claim of version.claims) {
+    for (const item of claim.evidence) {
+      const source = sourcesById.get(item.source_id);
+      if (source) sourceForEvidence.set(item.id, source);
+    }
+  }
+
   if (version.sections.length === 0) {
     return (
       <p className="measure text-body text-ink-muted">
@@ -147,6 +168,16 @@ export function ReportView({ version }: Props) {
               <span className="claim-label">Summary</span>
             ) : null}
           </div>
+
+          {/* `REQ-VIZ-001 AC-1`: charts appear without the reader asking,
+              above the claims they summarise. */}
+          {(chartsBySection.get(section.id) ?? []).map((viz) => (
+            <Visualization
+              key={viz.id}
+              viz={viz}
+              sourceForEvidence={sourceForEvidence}
+            />
+          ))}
 
           <div className="mt-8 flex flex-col gap-8">
             {section.claim_ids.map((claimId) => {

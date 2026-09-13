@@ -60,8 +60,12 @@ test("a question becomes an evidence-backed report", async ({ page }) => {
   const claim = page.locator(".claim").first();
   await expect(claim).toBeVisible({ timeout: 30_000 });
   await expect(claim.getByText("Fact")).toBeVisible();
-  await expect(claim.getByRole("link")).toBeVisible();
-  await expect(claim.getByText(/Read \w+ \d+, \d{4}/)).toBeVisible();
+  await expect(claim.getByRole("link").first()).toBeVisible();
+  // `.first()` because Phase 3 added the inspector: the retrieval date is now
+  // shown on the citation line *and* inside the inspection surface
+  // (`REQ-EVID-019 AC-1` requires it there). Two matches is the feature
+  // working, so the assertion narrows rather than the UI losing one of them.
+  await expect(claim.getByText(/Read \w+ \d+, \d{4}/).first()).toBeVisible();
 });
 
 test("a claim's type is not signalled by colour alone", async ({ page }) => {

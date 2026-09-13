@@ -572,3 +572,101 @@ async def test_the_reporting_period_is_inspectable_on_the_claim(
         "2024-12-31",
         "2025-12-31",
     }
+
+
+# --------------------------------------------------------------------------
+# Visualization reaches the rows
+# --------------------------------------------------------------------------
+
+
+async def test_a_chart_is_produced_from_sourced_evidence(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-VIZ-001 AC-1`: charts appear without the reader asking.
+
+    `select_visualization` was a correct pure function that nothing called —
+    the seventh instance of that shape in this project. This is the test that
+    it is reached.
+    """
+    from pipeline_support import trend_provider, trend_registry
+
+    from scrapr_core.db.models import Visualization
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        trend_registry(),
+        trend_provider(),
+        synthesis=cite_everything,
+    )
+
+    with session_factory() as session:
+        charts = session.execute(select(Visualization)).scalars().all()
+
+    assert charts, "three periods of sourced revenue produced no chart"
+
+
+async def test_every_charted_point_traces_to_evidence(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-VIZ-002 AC-1` and `REQ-VIZ-004 AC-1`, on the persisted spec.
+
+    The type makes an unsourced point unconstructable; this checks the link
+    rows exist too, because that is what the client resolves to show a chart's
+    sources.
+    """
+    from pipeline_support import trend_provider, trend_registry
+
+    from scrapr_core.db.models import Visualization, VisualizationEvidence
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        trend_registry(),
+        trend_provider(),
+        synthesis=cite_everything,
+    )
+
+    with session_factory() as session:
+        chart = session.execute(select(Visualization)).scalars().first()
+        assert chart is not None
+        linked = (
+            session.execute(
+                select(VisualizationEvidence.evidence_id).where(
+                    VisualizationEvidence.visualization_id == chart.id
+                )
+            )
+            .scalars()
+            .all()
+        )
+        known = set(session.execute(select(Evidence.id)).scalars().all())
+
+    points = chart.spec["series"][0]["points"]
+    assert len(points) == len(linked), "a point has no evidence link"
+    for point in points:
+        assert UUID(point["evidence_id"]) in known
+
+
+async def test_undated_evidence_produces_no_chart(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """`REQ-VIZ-001 AC-2`: data unsuited to visualization is not forced into
+    one. Without a period there is no axis to place a value on, and inventing
+    a position would be drawing a trend out of unordered numbers."""
+    from scrapr_core.db.models import Visualization
+
+    start_research(session_factory)
+
+    await run_pipeline(
+        session_factory,
+        disputed_registry(),
+        disputing_provider(),
+        synthesis=cite_everything,
+    )
+
+    with session_factory() as session:
+        charts = session.execute(select(Visualization)).scalars().all()
+
+    assert charts == []

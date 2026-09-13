@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime as dt
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index
+from sqlalchemy import BigInteger, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from scrapr_core.db.base import Base, CreatedAt, UuidPk
@@ -28,7 +28,11 @@ class Export(Base):
     """One export job and, once ready, the artifact it produced."""
 
     __tablename__ = "exports"
-    __table_args__ = (Index("ix_exports_version_id", "version_id"),)
+    __table_args__ = (
+        Index("ix_exports_version_id", "version_id"),
+        # The worker's claim query: pending or lapsed, oldest first.
+        Index("ix_exports_status_created_at", "status", "created_at"),
+    )
 
     id: Mapped[UuidPk]
 
@@ -46,6 +50,17 @@ class Export(Base):
     (`REQ-EXP-008`) rather than a public one."""
 
     error: Mapped[str | None]
+    """Why it failed, in words written for the reader. Never a stack trace."""
+
+    attempts: Mapped[int] = mapped_column(default=0)
+    """How many times a worker has taken it (`DEC-21`). Three, like a research
+    step, and then it is failed with a retry offered to the reader."""
+
+    lease_expires_at: Mapped[dt.datetime | None]
+    """While `running`: when another worker may take it over, because the one
+    rendering it has presumably died."""
+
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
 
     created_at: Mapped[CreatedAt]
     completed_at: Mapped[dt.datetime | None]

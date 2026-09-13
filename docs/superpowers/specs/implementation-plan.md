@@ -901,7 +901,7 @@ A: cache bypass, version comparison over normalized evidence, What's Changed, ch
 B: version navigation, What's Changed presentation.
 
 ### Phase 7 — Exports
-**Blocked by:** `OPEN-21`, `OPEN-22`, `OPEN-25`.
+**Blocked by:** nothing. `OPEN-21` closed by `DEC-21`, `OPEN-22` by `DEC-22` (`docs/decisions/OPEN-21-22.md`), `OPEN-25` by `DEC-11`. `export.generate` in §7.1 runs from the `exports` row itself, not `run_steps`; §6.1's export routes gain `GET .../exports` (list) and `POST /v1/exports/{id}/retry`.
 
 B: six theme definitions, PDF and PPTX renderers, export UI.
 A: export job pipeline, version binding, artifact storage and signed retrieval.

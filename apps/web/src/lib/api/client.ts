@@ -147,6 +147,45 @@ export function updateResearch(sessionId: string): Promise<CreateResearchRespons
   });
 }
 
+/* -------------------------------------------------------------------------
+ * Exports (`REQ-EXP-001..010`, `DEC-21`, `DEC-22`)
+ * ---------------------------------------------------------------------- */
+
+export type ExportJob = Schemas["ExportOut"];
+export type ExportFormat = ExportJob["format"];
+export type ExportTheme = ExportJob["theme"];
+
+/** Queue a PDF or PowerPoint of one version. Returns at once (`REQ-EXP-007`). */
+export function requestExport(
+  sessionId: string,
+  versionNumber: number,
+  format: ExportFormat,
+  theme: ExportTheme,
+): Promise<ExportJob> {
+  return request<ExportJob>(
+    `/v1/research/${sessionId}/versions/${versionNumber}/exports`,
+    { method: "POST", body: JSON.stringify({ format, theme }) },
+  );
+}
+
+/** Every export of one version, newest first. */
+export function listExports(sessionId: string, versionNumber: number): Promise<ExportJob[]> {
+  return request<ExportJob[]>(`/v1/research/${sessionId}/versions/${versionNumber}/exports`);
+}
+
+/**
+ * One export. When ready it carries a five-minute signed download link, so this
+ * is fetched at the moment the reader clicks Download, never ahead of time.
+ */
+export function getExport(exportId: string): Promise<ExportJob> {
+  return request<ExportJob>(`/v1/exports/${exportId}`);
+}
+
+/** Render a failed export again, without re-running research. */
+export function retryExport(exportId: string): Promise<ExportJob> {
+  return request<ExportJob>(`/v1/exports/${exportId}/retry`, { method: "POST" });
+}
+
 /** Proof the generated paths are the ones this module calls. */
 type KnownPaths = keyof paths;
 type UsedPath =

@@ -29,6 +29,11 @@ dependencies = [
     # `DEC-16`: passwords are hashed with Argon2id. A C-backed, maintained
     # implementation rather than anything hand-rolled over hashlib.
     "argon2-cffi>=23.1",
+    # `DEC-21`: exports are rendered in the worker. Both are pure-Python wheels
+    # with no system libraries, so a worker host needs nothing installed to
+    # produce a PDF or a deck.
+    "reportlab>=4.2",
+    "python-pptx>=1.0.2",
 ]
 
 [build-system]

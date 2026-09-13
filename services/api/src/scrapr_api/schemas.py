@@ -24,6 +24,9 @@ from scrapr_core.db.enums import (
     ClaimType,
     ConflictCause,
     ConflictStatus,
+    ExportFormat,
+    ExportStatus,
+    ExportTheme,
     MessageRole,
     ResearchStatus,
     RunKind,
@@ -478,6 +481,38 @@ class UploadOut(BaseModel):
     the honest answer to "did anything come out of this file"."""
 
     created_at: dt.datetime
+
+
+# --------------------------------------------------------------------------
+# Exports — `REQ-EXP-001..010`, `DEC-21`, `DEC-22`
+# --------------------------------------------------------------------------
+
+
+class ExportRequest(BaseModel):
+    """Which format, in which of the six themes (`REQ-EXP-003`)."""
+
+    format: ExportFormat
+    theme: ExportTheme
+
+
+class ExportOut(BaseModel):
+    """One export and where it stands (`REQ-EXP-006`, `REQ-EXP-007 AC-2`)."""
+
+    id: UUID
+    version_number: int
+    """The version it was generated from. Every export is bound to one."""
+    format: ExportFormat
+    theme: ExportTheme
+    status: ExportStatus
+    error: str | None
+    """Why it failed, for the reader. Null unless `status` is `failed`."""
+    size_bytes: int | None
+    created_at: dt.datetime
+    completed_at: dt.datetime | None
+    download_url: str | None = None
+    """A five-minute signed link, present only on `GET /v1/exports/{id}` for a
+    ready export (`REQ-EXP-008`). Fetched when the reader asks to download,
+    never stored, never listed."""
 
 
 # --------------------------------------------------------------------------

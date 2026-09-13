@@ -115,14 +115,23 @@ def detect_content_type(data: bytes, filename: str) -> str | None:
         return "application/pdf"
 
     # Both OOXML formats are zip archives; the difference is what is inside.
+    # Read from the archive's own directory, not by searching the raw bytes: a
+    # member's name sits wherever earlier members' compressed sizes put it —
+    # which moves with the timestamps inside them — and three bytes such as
+    # `xl/` turn up inside compressed data by chance. A byte search therefore
+    # misread the same kind of file on some saves and not others.
     if data.startswith(b"PK\x03\x04"):
-        head = data[:4096]
-        if b"word/" in head or b"word/document.xml" in data[:32768]:
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                names = set(archive.namelist())
+        except (zipfile.BadZipFile, ValueError):
+            return None
+        if "word/document.xml" in names:
             return (
                 "application/vnd.openxmlformats-officedocument"
                 ".wordprocessingml.document"
             )
-        if b"xl/" in head or b"xl/workbook.xml" in data[:32768]:
+        if "xl/workbook.xml" in names:
             return (
                 "application/vnd.openxmlformats-officedocument"
                 ".spreadsheetml.sheet"

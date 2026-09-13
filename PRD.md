@@ -1766,7 +1766,7 @@ The system MUST export research as PDF.
 **Acceptance criteria**
 - `AC-1` A PDF is produced containing the executive summary, sections, visualizations, and citations.
 - `AC-2` The PDF is downloadable by the user.
-- `AC-3` Generation approach is defined in `OPEN-21`.
+- `AC-3` Generation approach is defined in `OPEN-21` (closed by `DEC-21`).
 
 ---
 
@@ -1790,7 +1790,7 @@ Users MUST choose from predefined themes: **Professional/business**, **Investor/
 **Acceptance criteria**
 - `AC-1` All six themes are selectable.
 - `AC-2` Each theme produces a visually distinct output.
-- `AC-3` Theme visual definitions are specified in `OPEN-22`.
+- `AC-3` Theme visual definitions are specified in `OPEN-22` (closed by `DEC-22`).
 
 ---
 
@@ -2538,7 +2538,7 @@ The eight phases are the masterplan's, unchanged. Each phase has a success condi
 
 **Goal:** Let research leave the application.
 **Requirements:** `REQ-EXP-001..010`, `REQ-DATA-010`
-**Blocking open questions:** `OPEN-21`, `OPEN-22`, `OPEN-25`
+**Blocking open questions:** none remain. ~~`OPEN-21`~~ closed by `DEC-21`, ~~`OPEN-22`~~ by `DEC-22`, ~~`OPEN-25`~~ by `DEC-11`.
 **Exit condition:** Users can take their research outside the application.
 
 ### Phase 8 — Hardening
@@ -2621,8 +2621,8 @@ Owner key: **A** = Developer A (AI/research backend), **B** = Developer B (produ
 
 | ID | Question | Blocks | Owner |
 |---|---|---|---|
-| `OPEN-21` | What is the PDF and PowerPoint generation approach? | Phase 7 | B |
-| `OPEN-22` | What are the visual specifications for the six named themes? The masterplan names them but does not define them. | Phase 7 | B |
+| ~~`OPEN-21`~~ | **Closed by `DEC-21`**, 2026-09-13. Rendered in the worker from a renderer-agnostic document built from the version's rows: ReportLab for PDF (embedded Noto fonts, vector charts from the stored spec), python-pptx for PowerPoint (native charts and tables). No browser, no model. The `exports` row is the job, with a lease and three attempts. See `docs/decisions/OPEN-21-22.md`. | — | — |
+| ~~`OPEN-22`~~ | **Closed by `DEC-22`**, 2026-09-13. Six fixed definitions (ground, text, muted, accent, type, cover treatment, PowerPoint fonts), each AA-contrast checked by a test. Claim type, confidence, citations, conflicts and version carried by words and rules in every theme, never colour alone. | — | — |
 
 ### 13.8 Non-functional targets
 
@@ -2668,7 +2668,10 @@ Decisions the masterplan did not make and the team has since confirmed. These ar
 | `DEC-19` | **The retrieval cache is run-scoped.** Configurable TTL within a run, never shared across runs, sessions or users; Update Research therefore re-fetches every category, and no evidence is reused across versions. Updates re-ask the previous version's questions, ordered stale, then volatile, then stable. Full record: `docs/decisions/OPEN-26-27.md`. | `OPEN-26`, `N-07` | `REQ-TOOL-013`, `REQ-VER-003` | 2026-09-13 |
 | `DEC-20` | **What's Changed reports evidence changes, never rewording**, by the closed list of change kinds in the record, each labelled with the masterplan's categories and linked to the claims on both sides and the new evidence. Follow-up research that opens a version is treated as a user-initiated path alongside Update Research and gets the same summary. | `OPEN-27` | `REQ-VER-001`, `REQ-VER-004..007` | 2026-09-13 |
 
-**Open questions remaining** after `DEC-20`: `OPEN-03` (narrowed), `OPEN-18`, `OPEN-21`, `OPEN-22`, `OPEN-23`, `OPEN-29`.
+| `DEC-21` | **Exports are rendered in the worker, in Python, from the version's rows.** ReportLab (PDF, embedded fonts, vector charts) and python-pptx (PowerPoint, native charts and tables); no headless browser and no model call; deterministic output, so a retry is byte-identical. Full record: `docs/decisions/OPEN-21-22.md`. | `OPEN-21` | `REQ-EXP-001`, `REQ-EXP-002`, `REQ-EXP-004..008` | 2026-09-13 |
+| `DEC-22` | **Six fixed themes** — Professional, Investor, Modern, Corporate, Minimal, Dark — each a static definition with AA contrast, and every distinction `REQ-EXP-009` requires carried by words and rule treatment in all of them. | `OPEN-22` | `REQ-EXP-003`, `REQ-EXP-009`, `NFR-USE-002` | 2026-09-13 |
+
+**Open questions remaining** after `DEC-22`: `OPEN-03` (narrowed), `OPEN-18`, `OPEN-23`, `OPEN-29`.
 
 ---
 

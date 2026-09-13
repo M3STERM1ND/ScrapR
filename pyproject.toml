@@ -35,6 +35,9 @@ dev = [
     # exactly the kind of thing that surface exists to catch.
     "boto3-stubs[s3]>=1.35",
     "types-openpyxl>=3.1",
+    # `DEC-21` export renderers. python-pptx ships no stubs; see the mypy
+    # override below.
+    "types-reportlab>=4.2",
 ]
 
 # ---------------------------------------------------------------------------
@@ -102,6 +105,21 @@ disallow_any_generics = true
 disallow_untyped_defs = true
 disallow_untyped_calls = true
 warn_return_any = true
+
+[[tool.mypy.overrides]]
+# python-pptx publishes no type information and has no stub package. Confined
+# to the one module that imports it, `scrapr_core.export.pptx`, whose own
+# signatures stay fully typed.
+module = ["pptx", "pptx.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# python-pptx's constructors and chart builders are partially annotated, so
+# calling them is an "untyped call" under strict mode. Allowed in the slide
+# renderer only; everything it returns is converted to typed values there.
+module = ["scrapr_core.export.slides"]
+disallow_untyped_calls = false
+warn_return_any = false
 
 # ---------------------------------------------------------------------------
 # pytest

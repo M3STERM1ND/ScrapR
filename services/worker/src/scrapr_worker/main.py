@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from scrapr_core.config import Settings, get_settings
 from scrapr_core.db.engine import build_engine, build_session_factory
+from scrapr_core.export import ExportProcessor
 from scrapr_core.jobs import JobRunner
 from scrapr_core.lifecycle import PurgeReport, purge
 from scrapr_core.llm.anthropic_provider import DEFAULT_PROFILES, AnthropicProvider
@@ -51,6 +52,7 @@ from scrapr_core.storage.processing import DocumentProcessor
 from scrapr_core.tools.builder import build_registry
 
 __all__ = [
+    "build_exporter",
     "build_processor",
     "build_provider",
     "build_registry",
@@ -166,6 +168,13 @@ def build_runner(worker_id: str) -> JobRunner:
     )
 
 
+def build_exporter(
+    settings: Settings, session_factory: sessionmaker[Session]
+) -> ExportProcessor:
+    """The export renderer (`REQ-EXP-007`, `DEC-21`), sharing the worker's pool."""
+    return ExportProcessor(session_factory, ObjectStore(settings))
+
+
 def build_sweeper(
     settings: Settings, session_factory: sessionmaker[Session]
 ) -> Callable[[], PurgeReport]:
@@ -179,6 +188,7 @@ async def run_forever(
     stopping: asyncio.Event,
     processor: DocumentProcessor | None = None,
     sweeper: Callable[[], PurgeReport] | None = None,
+    exporter: ExportProcessor | None = None,
 ) -> None:
     """Poll for work until asked to stop.
 
@@ -223,6 +233,24 @@ async def run_forever(
                     else f"failed ({processed.reason})",
                 )
 
+        if exporter is not None:
+            # Off the event loop: rendering a PDF or a deck is CPU-bound, and a
+            # research step's tool calls must not stall behind it.
+            try:
+                exported = await asyncio.to_thread(exporter.run_one)
+            except Exception:
+                logger.exception("an export could not be processed; it will be retried")
+                exported = None
+            if exported is not None:
+                did_work = True
+                logger.info(
+                    "export %s: %s",
+                    exported.export_id,
+                    f"ready in {exported.render_ms} ms, {exported.size_bytes} bytes"
+                    if exported.ready
+                    else f"not ready ({exported.reason})",
+                )
+
         try:
             if await runner.run_one():
                 did_work = True
@@ -263,6 +291,7 @@ def main() -> int:
     runner = build_runner(worker_id)
     processor = build_processor(settings, get_session_factory())
     sweeper = build_sweeper(settings, get_session_factory())
+    exporter = build_exporter(settings, get_session_factory())
     stopping = asyncio.Event()
 
     def _stop(signum: int, frame: FrameType | None) -> None:
@@ -273,7 +302,7 @@ def main() -> int:
         signal.signal(received, _stop)
 
     logger.info("worker %s polling for steps and uploads", worker_id)
-    asyncio.run(run_forever(runner, stopping, processor, sweeper))
+    asyncio.run(run_forever(runner, stopping, processor, sweeper, exporter))
     logger.info("worker %s stopped", worker_id)
     return 0
 

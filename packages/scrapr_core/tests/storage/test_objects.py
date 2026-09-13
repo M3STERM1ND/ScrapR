@@ -145,6 +145,22 @@ def test_a_presigned_get_reads_it_back(store: ObjectStore, key: str) -> None:
     store.delete(key)
 
 
+def test_a_stored_artifact_downloads_as_an_attachment(store: ObjectStore, key: str) -> None:
+    """`REQ-EXP-008`, `DEC-21`: the worker stores an export; the owner's signed
+    link saves it under the application's name rather than displaying it."""
+    store.put(key, b"%PDF-1.4 test", "application/pdf")
+
+    response = httpx.get(store.presign_get(key, download_name="scrapr-research-v1-minimal.pdf"), timeout=10.0)
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-1.4 test"
+    assert response.headers["content-type"] == "application/pdf"
+    assert 'filename="scrapr-research-v1-minimal.pdf"' in response.headers["content-disposition"]
+    assert store.stored_size(key) == len(b"%PDF-1.4 test")
+    store.delete(key)
+    assert store.stored_size(key) is None
+
+
 def test_the_bucket_is_not_readable_without_a_signature(
     store: ObjectStore, key: str
 ) -> None:

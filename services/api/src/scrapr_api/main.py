@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from scrapr_api.errors import install_error_handlers
-from scrapr_api.routers import auth, history, research, uploads
+from scrapr_api.routers import auth, exports, history, research, uploads
 from scrapr_api.security import install_security_headers
 from scrapr_core.config import get_settings
 
@@ -73,6 +73,8 @@ def create_app() -> FastAPI:
     app.include_router(auth.claim_router)
     app.include_router(research.router)
     app.include_router(uploads.router)
+    app.include_router(exports.research_exports)
+    app.include_router(exports.router)
     app.include_router(history.router)
 
     @app.get("/health", tags=["meta"])

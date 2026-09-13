@@ -2,8 +2,9 @@
 
 Turns a question into an evidence-backed report with sources, analysis, charts and follow-up.
 
-**Status: Phase 6 complete.** Research without an account, save it to one, come
-back to it, and update it without losing what it said before.
+**Status: Phase 7 complete.** Research without an account, save it to one, come
+back to it, update it without losing what it said before, and take it away as a
+PDF or a PowerPoint deck in one of six themes.
 
 Ask a question at `/research/new`, watch the activity timeline fill in as the
 worker executes the steps, and read the report that comes back with citations,
@@ -41,6 +42,7 @@ packages/scrapr_core/ all Python domain logic
   synthesis/          the validation gate
   lifecycle/          deletion, expiry and the purge sweep
   versioning/         update prioritisation and What's Changed
+  export/             document, six themes, PDF and PPTX renderers, export job
 packages/contracts/   openapi.json, generated from the API
 docs/                 specs and decision records
 design-system/        MASTER.md, the landing visual system

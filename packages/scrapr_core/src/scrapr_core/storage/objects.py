@@ -139,18 +139,40 @@ class ObjectStore:
             + dt.timedelta(seconds=PUT_EXPIRY_SECONDS),
         )
 
-    def presign_get(self, storage_key: str) -> str:
-        """A short-lived URL to read one object (`REQ-EXP-008`)."""
+    def presign_get(self, storage_key: str, *, download_name: str | None = None) -> str:
+        """A short-lived URL to read one object (`REQ-EXP-008`).
+
+        `download_name` makes the browser save rather than display, under a
+        name the application chose. It is built from fixed parts, never from
+        user text, so it cannot smuggle a header through the signature.
+        """
+        params: dict[str, str] = {"Bucket": self._bucket, "Key": storage_key}
+        if download_name:
+            params["ResponseContentDisposition"] = f'attachment; filename="{download_name}"'
         try:
             return str(
                 self._client.generate_presigned_url(
                     "get_object",
-                    Params={"Bucket": self._bucket, "Key": storage_key},
+                    Params=params,
                     ExpiresIn=GET_EXPIRY_SECONDS,
                 )
             )
         except (BotoCoreError, ClientError) as exc:
             raise StorageError(f"could not presign a download: {exc}") from exc
+
+    def put(self, storage_key: str, data: bytes, content_type: str) -> None:
+        """Store a generated artifact (`REQ-EXP-008`, `DEC-21`).
+
+        The one write of bytes the application makes, and it happens in the
+        worker: an export is produced server-side, so there is no browser to
+        hand a presigned URL to. Uploads still never pass through here.
+        """
+        try:
+            self._client.put_object(
+                Bucket=self._bucket, Key=storage_key, Body=data, ContentType=content_type
+            )
+        except (BotoCoreError, ClientError) as exc:
+            raise StorageError(f"could not store the artifact: {exc}") from exc
 
     def stored_size(self, storage_key: str) -> int | None:
         """How large the stored object actually is, or `None` if absent.

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { DeleteResearch } from "@/components/account/DeleteResearch";
 import { ActivityTimeline } from "@/components/activity/ActivityTimeline";
 import { ConversationPanel } from "@/components/conversation/ConversationPanel";
+import { ExportPanel } from "@/components/exports/ExportPanel";
 import { ReportView } from "@/components/report/ReportView";
 import { VersionNav } from "@/components/versions/VersionNav";
 import { WhatsChanged } from "@/components/versions/WhatsChanged";
@@ -251,6 +252,14 @@ export function Workspace({ sessionId, versionNumber }: Props) {
           <p role="alert" className="mt-4 text-small text-ink-soft">
             {updateError}
           </p>
+        ) : null}
+
+        {/* Flow D: any finished version can leave the application, the one on
+            screen being the one exported (`REQ-EXP-006`). */}
+        {version ? (
+          <div className="mt-4">
+            <ExportPanel sessionId={sessionId} versionNumber={version.version_number} />
+          </div>
         ) : null}
 
         {session ? (

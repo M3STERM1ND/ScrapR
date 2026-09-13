@@ -21,10 +21,18 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from scrapr_core.db.enums import UploadState
-from scrapr_core.db.models import ResearchSession, Upload
+from scrapr_core.db.base import utcnow
+from scrapr_core.db.enums import (
+    ExportFormat,
+    ExportStatus,
+    ExportTheme,
+    UploadState,
+    VersionStatus,
+)
+from scrapr_core.db.models import Export, ResearchSession, ResearchVersion, Upload
 
 pytestmark = pytest.mark.integration
 
@@ -56,6 +64,12 @@ PROBES: dict[tuple[str, str], Probe] = {
     ("GET", "/v1/research/{session_id}/uploads"): Probe(),
     ("POST", "/v1/research/{session_id}/uploads/{upload_id}/complete"): Probe(),
     ("DELETE", "/v1/research/{session_id}/uploads/{upload_id}"): Probe(),
+    ("POST", "/v1/research/{session_id}/versions/{version_number}/exports"): Probe(
+        body={"format": "pdf", "theme": "minimal"}
+    ),
+    ("GET", "/v1/research/{session_id}/versions/{version_number}/exports"): Probe(),
+    ("GET", "/v1/exports/{export_id}"): Probe(),
+    ("POST", "/v1/exports/{export_id}/retry"): Probe(),
 }
 
 
@@ -72,6 +86,7 @@ def parameterised_routes(app: FastAPI) -> set[tuple[str, str]]:
 class Victim:
     session_id: str
     upload_id: str
+    export_id: str
 
 
 @pytest.fixture
@@ -97,10 +112,27 @@ def victim(app: FastAPI, session_factory: sessionmaker[Session]) -> Victim:
             processing_state=UploadState.PENDING,
         )
         session.add(upload)
+        research = session.get(ResearchSession, UUID(session_id))
+        assert research is not None and research.current_version_id is not None
+        version = session.get(ResearchVersion, research.current_version_id)
+        assert version is not None
+        # A finished version with a failed export: every export route has
+        # something real to refuse, including retry.
+        version.status = VersionStatus.COMPLETE
+        version.closed_at = utcnow()
+        export = Export(
+            version_id=version.id,
+            format=ExportFormat.PDF,
+            theme=ExportTheme.MINIMAL,
+            status=ExportStatus.FAILED,
+            storage_key=f"exports/{session_id}/private.pdf",
+            error="failed",
+        )
+        session.add(export)
         session.commit()
-        upload_id = str(upload.id)
+        upload_id, export_id = str(upload.id), str(export.id)
 
-    return Victim(session_id=session_id, upload_id=upload_id)
+    return Victim(session_id=session_id, upload_id=upload_id, export_id=export_id)
 
 
 def stranger_account(app: FastAPI) -> TestClient:
@@ -149,7 +181,10 @@ def test_a_stranger_cannot_reach_someone_elses_research(
     client = STRANGERS[stranger](app)
     probe = PROBES[(method, path)]
     url = path.format(
-        session_id=victim.session_id, version_number=1, upload_id=victim.upload_id
+        session_id=victim.session_id,
+        version_number=1,
+        upload_id=victim.upload_id,
+        export_id=victim.export_id,
     )
 
     response = client.request(method, url, json=probe.body)
@@ -167,6 +202,9 @@ def test_a_stranger_cannot_reach_someone_elses_research(
         upload = session.get(Upload, UUID(victim.upload_id))
         assert upload is not None and upload.deleted_at is None
         assert upload.processing_state is UploadState.PENDING
+        export = session.get(Export, UUID(victim.export_id))
+        assert export is not None and export.status is ExportStatus.FAILED
+        assert session.execute(select(func.count(Export.id))).scalar_one() == 1
 
 
 def test_history_shows_only_the_requesting_accounts_research(

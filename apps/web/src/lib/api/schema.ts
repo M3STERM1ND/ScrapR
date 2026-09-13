@@ -108,6 +108,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/exports/{export_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Export
+         * @description One export; with a short-lived download link once it is ready.
+         */
+        get: operations["get_export_v1_exports__export_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/exports/{export_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Export
+         * @description Render a failed export again, without re-running research (`NFR-REL-003`).
+         */
+        post: operations["retry_export_v1_exports__export_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/me/research": {
         parameters: {
             query?: never;
@@ -427,6 +467,34 @@ export interface paths {
         get: operations["get_version_v1_research__session_id__versions__version_number__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/research/{session_id}/versions/{version_number}/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Exports
+         * @description Every export of one version, newest first (export version tracking).
+         */
+        get: operations["list_exports_v1_research__session_id__versions__version_number__exports_get"];
+        put?: never;
+        /**
+         * Request Export
+         * @description Queue a PDF or PowerPoint of one version in one theme.
+         *
+         *     Asking again for the same version, format and theme returns the export
+         *     already queued or ready rather than rendering it twice: the version cannot
+         *     change, so neither can the file.
+         */
+        post: operations["request_export_v1_research__session_id__versions__version_number__exports_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -818,6 +886,61 @@ export interface components {
             /** Value Raw */
             value_raw: string | null;
         };
+        /**
+         * ExportFormat
+         * @description Export formats (`REQ-EXP-001`, `REQ-EXP-002`).
+         * @enum {string}
+         */
+        ExportFormat: "pdf" | "pptx";
+        /**
+         * ExportOut
+         * @description One export and where it stands (`REQ-EXP-006`, `REQ-EXP-007 AC-2`).
+         */
+        ExportOut: {
+            /** Completed At */
+            completed_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Download Url */
+            download_url?: string | null;
+            /** Error */
+            error: string | null;
+            format: components["schemas"]["ExportFormat"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Size Bytes */
+            size_bytes: number | null;
+            status: components["schemas"]["ExportStatus"];
+            theme: components["schemas"]["ExportTheme"];
+            /** Version Number */
+            version_number: number;
+        };
+        /**
+         * ExportRequest
+         * @description Which format, in which of the six themes (`REQ-EXP-003`).
+         */
+        ExportRequest: {
+            format: components["schemas"]["ExportFormat"];
+            theme: components["schemas"]["ExportTheme"];
+        };
+        /**
+         * ExportStatus
+         * @description Export job lifecycle. Retryable without re-running research (`NFR-REL-003`).
+         * @enum {string}
+         */
+        ExportStatus: "pending" | "running" | "ready" | "failed";
+        /**
+         * ExportTheme
+         * @description The six predefined themes (`REQ-EXP-003`). Visual definitions are `OPEN-22`.
+         * @enum {string}
+         */
+        ExportTheme: "professional" | "investor" | "modern" | "corporate" | "minimal" | "dark";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1343,6 +1466,74 @@ export interface operations {
             };
         };
     };
+    get_export_v1_exports__export_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_export_v1_exports__export_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_history_v1_me_research_get: {
         parameters: {
             query?: {
@@ -1849,6 +2040,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_exports_v1_research__session_id__versions__version_number__exports_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                version_number: number;
+            };
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_export_v1_research__session_id__versions__version_number__exports_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                version_number: number;
+            };
+            cookie?: {
+                scrapr_account?: string | null;
+                scrapr_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportOut"];
                 };
             };
             /** @description Validation Error */

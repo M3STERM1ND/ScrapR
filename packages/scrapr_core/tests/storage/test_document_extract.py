@@ -122,6 +122,29 @@ def test_docx_and_xlsx_are_told_apart_inside_the_zip() -> None:
     assert detect_content_type(_xlsx([["a", 1]]), "numbers.xlsx") == XLSX
 
 
+def test_detection_reads_the_archive_directory_not_the_raw_bytes() -> None:
+    """Regression: an intermittent misdetection, seen in a full test run.
+
+    Detection used to search the first few kilobytes for `word/` or `xl/`. A
+    member name lands wherever earlier compressed members put it, and short
+    byte patterns appear inside compressed data by chance. Here the workbook's
+    real members come after 40 KB of other content, and a decoy member whose
+    *name* contains `word/` comes first — only the archive's directory tells
+    the truth.
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("docProps/notes-about-word/decoy.txt", b"x" * 40_000)
+        archive.writestr("[Content_Types].xml", b"<Types/>")
+        archive.writestr("xl/workbook.xml", b"<workbook/>")
+
+    assert detect_content_type(buffer.getvalue(), "numbers.xlsx") == XLSX
+
+
+def test_a_corrupt_zip_is_rejected_not_raised() -> None:
+    assert detect_content_type(b"PK\x03\x04 not really a zip", "report.docx") is None
+
+
 def test_a_renamed_executable_is_not_accepted() -> None:
     """The extension is a claim; the bytes are the answer.
 

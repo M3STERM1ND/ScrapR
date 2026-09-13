@@ -38,6 +38,9 @@ async function fillField(page: Page, label: string, value: string): Promise<void
 }
 
 test("research saved to a new account survives signing out and back in", async ({ page }) => {
+  // A full research run plus five page transitions: the default 30 seconds is
+  // a budget for one page, not for a whole flow on a busy machine.
+  test.setTimeout(90_000);
   const objective = `What is Acme Corp's hiring outlook? ${Date.now()}`;
   const email = uniqueEmail();
 

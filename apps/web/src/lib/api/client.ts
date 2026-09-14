@@ -40,7 +40,10 @@ export type Change = Schemas["ChangeOut"];
 export type ActivityEvent = Schemas["ActivityEventOut"];
 export type ActivityPage = Schemas["ActivityPage"];
 
-/** Where the API lives. Same-origin in production; a dev server otherwise. */
+/**
+ * Where the API lives. In production `/api`, which `next.config.ts` proxies to
+ * the API so the session cookie is first-party; a dev server otherwise.
+ */
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 

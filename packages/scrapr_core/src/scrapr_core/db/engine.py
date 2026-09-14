@@ -9,19 +9,36 @@ endpoints in a threadpool, which covers it.
 This is an implementation-level choice, recorded here rather than argued in
 every module. Should a route appear that genuinely needs async database access,
 the psycopg driver already supports it and the change is scoped to that path.
+
+**No server-side prepared statements.** Production connects through Supabase's
+pooler, which hands one Postgres backend to client after client. psycopg 3
+prepares any query it has run `prepare_threshold` times (five, by default) and
+names it `_pg3_<n>`, counting from zero again on every new connection — so a
+client that inherits a backend a previous client prepared on collides with it:
+`prepared statement "_pg3_1" already exists`. The statements this application
+runs are short and plan in microseconds, so preparing them buys nothing worth a
+failure that only appears behind the pooler. It is off everywhere, not only in
+production, so the test suite runs the configuration that ships.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Final
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from scrapr_core.config import Settings, get_settings
 
-__all__ = ["build_engine", "build_session_factory", "session_scope"]
+__all__ = ["PSYCOPG_CONNECT_ARGS", "build_engine", "build_session_factory", "session_scope"]
+
+PSYCOPG_CONNECT_ARGS: Final[dict[str, object]] = {
+    # psycopg 3's switch for "never prepare on the server". Passed through
+    # SQLAlchemy to `psycopg.Connection.connect` for every pooled connection.
+    "prepare_threshold": None,
+}
 
 
 def build_engine(settings: Settings | None = None) -> Engine:
@@ -36,6 +53,8 @@ def build_engine(settings: Settings | None = None) -> Engine:
         resolved.database_url,
         pool_pre_ping=True,
         future=True,
+        # A copy, so no engine can alter the arguments another one is built with.
+        connect_args=dict(PSYCOPG_CONNECT_ARGS),
     )
 
 

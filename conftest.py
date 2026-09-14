@@ -23,9 +23,12 @@ from collections.abc import Iterator
 import pytest
 from alembic import command
 from db_support import alembic_config, ensure_database_exists, scratch_database_url
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
+
+from scrapr_core.config import Settings
+from scrapr_core.db.engine import build_engine
 
 
 @pytest.fixture(scope="session")
@@ -44,7 +47,11 @@ def migrated_engine() -> Iterator[Engine]:
 
     command.upgrade(alembic_config(url), "head")
 
-    engine = create_engine(url, pool_pre_ping=True)
+    # The application's own engine, so every database test runs the connection
+    # options production runs — prepared statements off included.
+    engine = build_engine(
+        Settings.model_validate({"DATABASE_URL": url.render_as_string(hide_password=False)})
+    )
     yield engine
     engine.dispose()
 

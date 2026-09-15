@@ -1,7 +1,8 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import { ArrowRight, ButtonLink, Eyebrow } from "@/components/ui/primitives";
+import { ArrowRight } from "@/components/ui/icons";
+import { ButtonLink, Eyebrow } from "@/components/ui/primitives";
 import { HeroVisual } from "./HeroVisual";
 
 const LINES = ["Ask one question.", "Get research you can check."];

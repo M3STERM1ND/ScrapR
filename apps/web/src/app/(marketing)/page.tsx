@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import { EvidenceTrust } from "@/components/sections/EvidenceTrust";
 import { Faq } from "@/components/sections/Faq";
 import { Features } from "@/components/sections/Features";
@@ -9,6 +11,10 @@ import { RecentNews } from "@/components/sections/RecentNews";
 import { ResearchPreview } from "@/components/sections/ResearchPreview";
 import { SearchHistory } from "@/components/sections/SearchHistory";
 import { WorkspaceSection } from "@/components/sections/WorkspaceSection";
+
+export const metadata: Metadata = {
+  title: "AI Research",
+};
 
 export default function Home() {
   return (

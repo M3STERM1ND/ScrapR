@@ -6,6 +6,7 @@ import type {
   Version,
 } from "@/lib/api/client";
 
+import { TrustedSourcesIcon } from "@/components/ui/icons";
 import { DocumentMark } from "@/components/ui/primitives";
 
 import { Visualization } from "./Visualization";
@@ -280,7 +281,8 @@ function ClaimInspector({
 }) {
   return (
     <details className="mt-3">
-      <summary className="inspect-toggle">
+      <summary className="inspect-toggle inline-flex items-center gap-1.5">
+        <TrustedSourcesIcon className="h-3.5 w-3.5" />
         Inspect {claim.evidence.length}{" "}
         {claim.evidence.length === 1 ? "source" : "sources"}
       </summary>

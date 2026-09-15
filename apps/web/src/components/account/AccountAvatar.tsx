@@ -3,14 +3,16 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 
+import { AccountIcon, SignOutIcon, WorkspaceIcon } from "@/components/ui/icons";
 import { signOutAndAnnounce } from "@/lib/account";
 import type { Account } from "@/lib/api/client";
 
 /**
  * The signed-in reader, as a small circle rather than an email address.
  *
- * A glyph, not a photo: accounts are email and password (`DEC-16`) and carry no
- * profile image, so there is nothing real to show and nothing is invented.
+ * The family's account icon, not a photo: accounts are email and password
+ * (`DEC-16`) and carry no profile image, so there is nothing real to show and
+ * nothing is invented.
  */
 export function AvatarGlyph({ className = "" }: { className?: string }) {
   return (
@@ -18,15 +20,7 @@ export function AvatarGlyph({ className = "" }: { className?: string }) {
       aria-hidden
       className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line-strong bg-surface text-ink-muted ${className}`}
     >
-      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
-        <circle cx="10" cy="7" r="3.25" stroke="currentColor" strokeWidth="1.5" />
-        <path
-          d="M3.75 17c.9-3 3.3-4.75 6.25-4.75S15.35 14 16.25 17"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      </svg>
+      <AccountIcon />
     </span>
   );
 }
@@ -76,7 +70,7 @@ export function AccountDropdown({ account, onSignedOut }: AccountDropdownProps) 
   }
 
   const item =
-    "block w-full px-4 py-2.5 text-left text-small text-ink-soft transition-colors duration-200 hover:bg-paper hover:text-ink";
+    "flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-small text-ink-soft transition-colors duration-200 hover:bg-paper hover:text-ink";
 
   return (
     <div ref={root} className="relative">
@@ -104,9 +98,11 @@ export function AccountDropdown({ account, onSignedOut }: AccountDropdownProps) 
           </p>
         </div>
         <Link href="/history" onClick={() => setOpen(false)} className={item}>
+          <WorkspaceIcon className="h-4 w-4 text-ink-muted" />
           Saved research
         </Link>
         <button type="button" onClick={onSignOut} className={`${item} border-t border-line`}>
+          <SignOutIcon className="h-4 w-4 text-ink-muted" />
           Sign out
         </button>
       </div>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { Logo } from "@/components/ui/Logo";
-import { ArrowRight } from "@/components/ui/primitives";
+import { ArrowRight } from "@/components/ui/icons";
 
 /**
  * A closing invitation, then the smallest possible footer.

@@ -5,7 +5,7 @@ import { Eyebrow } from "@/components/ui/primitives";
 import { safeNext } from "@/lib/account";
 
 export const metadata: Metadata = {
-  title: "Sign in — ScrapR",
+  title: "Sign in",
   robots: { index: false, follow: false },
 };
 

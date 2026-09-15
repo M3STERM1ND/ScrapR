@@ -12,6 +12,7 @@ import {
   type ExportJob,
   type ExportTheme,
 } from "@/lib/api/client";
+import { DownloadIcon, GenerateIcon } from "@/components/ui/icons";
 
 /**
  * Export a version as PDF or PowerPoint (Flow D, `REQ-EXP-001..010`).
@@ -136,8 +137,9 @@ export function ExportPanel({
         onClick={onToggle}
         aria-expanded={open}
         aria-controls="export-panel"
-        className="inline-flex h-10 items-center rounded-sm border border-line-strong px-4 text-small font-medium text-ink transition-colors duration-200 hover:border-ink hover:bg-surface"
+        className="inline-flex h-10 items-center gap-2 rounded-sm border border-line-strong px-4 text-small font-medium text-ink transition-colors duration-200 hover:border-ink hover:bg-surface"
       >
+        <DownloadIcon />
         Export
       </button>
 
@@ -218,8 +220,9 @@ export function ExportPanel({
               type="button"
               onClick={onCreate}
               disabled={busy}
-              className="inline-flex h-11 items-center rounded-sm bg-ink px-5 text-small font-medium text-paper shadow-soft transition-colors duration-200 hover:bg-ochre-deep disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-muted"
+              className="inline-flex h-11 items-center gap-2 rounded-sm bg-ink px-5 text-small font-medium text-paper shadow-soft transition-colors duration-200 hover:bg-ochre-deep disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-muted"
             >
+              <GenerateIcon />
               {busy ? "Queuing" : `Create ${FORMAT_WORD[format]}`}
             </button>
             <p className="text-micro text-ink-muted">No account needed.</p>
@@ -247,8 +250,9 @@ export function ExportPanel({
                     <button
                       type="button"
                       onClick={() => void onDownload(job)}
-                      className="text-small font-medium text-ochre-deep underline decoration-line-strong underline-offset-4"
+                      className="inline-flex items-center gap-1.5 text-small font-medium text-ochre-deep underline decoration-line-strong underline-offset-4"
                     >
+                      <DownloadIcon />
                       Download
                     </button>
                   ) : job.status === "failed" ? (

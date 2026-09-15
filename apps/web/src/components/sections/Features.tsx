@@ -1,3 +1,9 @@
+import {
+  AiPoweredIcon,
+  InsightsIcon,
+  ResearchIcon,
+  TrustedSourcesIcon,
+} from "@/components/ui/icons";
 import { Reveal } from "@/components/ui/Reveal";
 import { SectionIntro } from "@/components/ui/primitives";
 
@@ -7,6 +13,8 @@ import { SectionIntro } from "@/components/ui/primitives";
  * Not a row of identical cards: each panel is sized to what it has to show, and
  * each carries a small purpose-built demonstration rather than an icon. A grid
  * of equal boxes would say all four are the same weight, and they are not.
+ * The small icon beside each label names the capability; the demo still does
+ * the showing.
  */
 
 function DepthDemo() {
@@ -135,7 +143,10 @@ export function Features() {
         <div className="mt-16 grid gap-6 md:mt-24 lg:grid-cols-12">
           <Reveal className="lg:col-span-7">
             <div className="h-full rounded-lg border border-line bg-surface p-8 shadow-soft sm:p-10">
-              <p className="claim-label">Deep research</p>
+              <p className="claim-label flex items-center gap-2">
+                <ResearchIcon className="h-4 w-4 text-ink" />
+                Deep research
+              </p>
               <h3 className="display-m mt-4 max-w-[18ch] text-ink">
                 It keeps going until the question is answered.
               </h3>
@@ -150,7 +161,10 @@ export function Features() {
 
           <Reveal delay={0.06} className="lg:col-span-5">
             <div className="h-full rounded-lg border border-line bg-surface p-8 shadow-soft sm:p-10">
-              <p className="claim-label">Citations</p>
+              <p className="claim-label flex items-center gap-2">
+                <TrustedSourcesIcon className="h-4 w-4 text-ink" />
+                Citations
+              </p>
               <h3 className="mt-4 text-lead font-medium text-ink">
                 Every factual line carries its source
               </h3>
@@ -164,7 +178,10 @@ export function Features() {
 
           <Reveal delay={0.12} className="lg:col-span-5">
             <div className="h-full rounded-lg border border-line bg-surface p-8 shadow-soft sm:p-10">
-              <p className="claim-label">Visualizations</p>
+              <p className="claim-label flex items-center gap-2">
+                <InsightsIcon className="h-4 w-4 text-ink" />
+                Visualizations
+              </p>
               <h3 className="mt-4 text-lead font-medium text-ink">
                 Charts built from sourced numbers
               </h3>
@@ -178,7 +195,10 @@ export function Features() {
 
           <Reveal delay={0.18} className="lg:col-span-7">
             <div className="h-full rounded-lg border border-line bg-surface p-8 shadow-soft sm:p-10">
-              <p className="claim-label">Follow-up</p>
+              <p className="claim-label flex items-center gap-2">
+                <AiPoweredIcon className="h-4 w-4 text-ink" />
+                Follow-up
+              </p>
               <h3 className="mt-4 text-lead font-medium text-ink">
                 Ask about what you just read
               </h3>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { AccountDropdown, AvatarGlyph } from "@/components/account/AccountAvatar";
+import { SignOutIcon, WorkspaceIcon } from "@/components/ui/icons";
 import { Logo } from "@/components/ui/Logo";
 import { signOutAndAnnounce } from "@/lib/account";
 import { useAccount } from "@/lib/useAccount";
@@ -178,8 +179,9 @@ export function Navbar() {
               <Link
                 href="/history"
                 onClick={() => setOpen(false)}
-                className="block py-3 text-body text-ink-soft"
+                className="flex items-center gap-3 py-3 text-body text-ink-soft"
               >
+                <WorkspaceIcon className="h-5 w-5 text-ink-muted" />
                 Saved research
               </Link>
               <button
@@ -188,8 +190,9 @@ export function Navbar() {
                   setOpen(false);
                   void signOutAndAnnounce();
                 }}
-                className="block w-full py-3 text-left text-body text-ink-soft"
+                className="flex w-full items-center gap-3 py-3 text-left text-body text-ink-soft"
               >
+                <SignOutIcon className="h-5 w-5 text-ink-muted" />
                 Sign out
               </button>
             </li>

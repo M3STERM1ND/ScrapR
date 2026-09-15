@@ -17,6 +17,9 @@
      inverted section could not carry an accent word legibly. 6.6:1 here. */
   --color-ochre-light: #d3903a;
   --color-ochre-wash: #f7ecdd;
+  /* The spark in the ScrapR mark, sampled from the app icon. Decoration only —
+     at 2:1 on paper it never carries text. */
+  --color-spark: #d4ab75;
   --color-night: #1a1815;
   --color-night-soft: #241f1a;
   --color-night-line: #35302a;

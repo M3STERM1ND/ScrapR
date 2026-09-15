@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { Workspace } from "@/components/workspace/Workspace";
 
 export const metadata: Metadata = {
-  title: "Research — ScrapR",
+  title: "Research",
   // Research is private to its owner (`REQ-SEC-016`), so there is nothing here
   // for a crawler to index even if a link were shared.
   robots: { index: false, follow: false },

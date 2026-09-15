@@ -9,13 +9,27 @@ const plusJakarta = Plus_Jakarta_Sans({
   display: "swap",
 });
 
+/**
+ * The name is "ScrapR" in text everywhere, even though the wordmark draws its S
+ * as the mark: a tab, a bookmark and a search result cannot show a drawing.
+ * Pages give only their own part, and the template puts the name first.
+ *
+ * Icons come from the file conventions beside this file — `favicon.ico`,
+ * `icon.png`, `apple-icon.png` and `manifest.ts` — all cut from the one app icon.
+ */
 export const metadata: Metadata = {
-  title: "ScrapR — research that shows its sources",
+  title: {
+    default: "ScrapR",
+    template: "ScrapR | %s",
+  },
+  applicationName: "ScrapR",
   description:
     "Ask one question and get a full report back: findings, charts, and a citation behind every claim, with the shaky parts marked as shaky.",
   metadataBase: new URL("https://scrapr.app"),
+  appleWebApp: { title: "ScrapR" },
   openGraph: {
-    title: "ScrapR — research that shows its sources",
+    title: "ScrapR | AI Research",
+    siteName: "ScrapR",
     description:
       "Ask one question and get a full report back: findings, charts, and a citation behind every claim.",
     type: "website",

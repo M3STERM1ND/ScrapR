@@ -10,7 +10,7 @@ import {
   listUploads,
   startResearch,
 } from "@/lib/api/client";
-import { ArrowRight } from "@/components/ui/primitives";
+import { ArrowRight, IdeasIcon } from "@/components/ui/icons";
 import { Attachments, type Attachment } from "./Attachments";
 
 /**
@@ -218,7 +218,10 @@ export function ObjectiveForm() {
       </div>
 
       <div className="mt-14">
-        <p className="claim-label">Or start from one of these</p>
+        <p className="claim-label flex items-center gap-2">
+          <IdeasIcon />
+          Or start from one of these
+        </p>
         <ul className="mt-4 flex flex-col gap-px">
           {EXAMPLES.map((example) => (
             <li key={example}>

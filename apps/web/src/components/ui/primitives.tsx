@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { DocumentIcon } from "@/components/ui/icons";
+
 export function Eyebrow({
   children,
   tone = "light",
@@ -93,55 +95,6 @@ export function ButtonLink({
     <a href={href} className={`${base} ${variants[variant]} ${className}`}>
       {children}
     </a>
-  );
-}
-
-export function ArrowRight({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden
-      className={`h-4 w-4 transition-transform duration-200 ease-out group-hover:translate-x-0.5 ${className}`}
-    >
-      <path
-        d="M2.5 8h11m0 0L9.5 4m4 4-4 4"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/**
- * A document, drawn rather than typed.
- *
- * MASTER.md forbids emoji as icons, so this is inline SVG at the 1.5px stroke
- * every other mark in the system uses.
- */
-export function DocumentIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden
-      className={`h-3.5 w-3.5 ${className}`}
-    >
-      <path
-        d="M9 1.5H4.5A1.5 1.5 0 0 0 3 3v10a1.5 1.5 0 0 0 1.5 1.5h7A1.5 1.5 0 0 0 13 13V5.5L9 1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9 1.5V5.5H13"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 

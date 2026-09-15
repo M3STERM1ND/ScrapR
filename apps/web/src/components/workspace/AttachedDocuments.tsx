@@ -1,6 +1,6 @@
 import type { Upload } from "@/lib/api/client";
 
-import { DocumentIcon } from "@/components/ui/primitives";
+import { DocumentIcon } from "@/components/ui/icons";
 
 /**
  * The documents attached to this research, and what became of each

@@ -4,7 +4,7 @@ import { HistoryList } from "@/components/history/HistoryList";
 import { Eyebrow } from "@/components/ui/primitives";
 
 export const metadata: Metadata = {
-  title: "Saved research — ScrapR",
+  title: "Saved research",
   robots: { index: false, follow: false },
 };
 

@@ -6,7 +6,7 @@ import { useState, type FormEvent } from "react";
 
 import { announceAccountChange } from "@/lib/account";
 import { ApiError, signIn, signUp } from "@/lib/api/client";
-import { ArrowRight } from "@/components/ui/primitives";
+import { ArrowRight } from "@/components/ui/icons";
 
 /**
  * Sign up or sign in (`REQ-AUTH-003`, Flow E and Flow F).

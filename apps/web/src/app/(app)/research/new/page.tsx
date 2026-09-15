@@ -4,7 +4,7 @@ import { ObjectiveForm } from "@/components/intake/ObjectiveForm";
 import { Eyebrow } from "@/components/ui/primitives";
 
 export const metadata: Metadata = {
-  title: "New research — ScrapR",
+  title: "New research",
   description:
     "Ask a question and get an evidence-backed report with a citation behind every claim.",
 };

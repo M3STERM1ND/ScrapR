@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Workspace } from "@/components/workspace/Workspace";
 
 export const metadata: Metadata = {
-  title: "Research version — ScrapR",
+  title: "Research version",
   robots: { index: false, follow: false },
 };
 

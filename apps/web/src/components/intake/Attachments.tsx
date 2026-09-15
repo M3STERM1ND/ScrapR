@@ -8,7 +8,7 @@ import {
   declaredContentType,
   ACCEPTED_UPLOAD_TYPES,
 } from "@/lib/api/client";
-import { DocumentIcon } from "@/components/ui/primitives";
+import { UploadIcon } from "@/components/ui/icons";
 
 /**
  * Attaching documents at intake (`REQ-INPUT-004`, `REQ-DOC-001`).
@@ -106,7 +106,7 @@ export function Attachments({
           disabled={disabled || files.length >= MAX_FILES}
           className="group inline-flex items-center gap-2 text-small text-ink underline decoration-line-strong underline-offset-4 transition-colors hover:text-ochre-deep disabled:cursor-not-allowed disabled:text-ink-muted disabled:no-underline"
         >
-          <DocumentIcon />
+          <UploadIcon />
           {files.length >= MAX_FILES
             ? `That is the limit of ${MAX_FILES} files`
             : "Choose files, or drop them here"}

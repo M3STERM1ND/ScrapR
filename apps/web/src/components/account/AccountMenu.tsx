@@ -22,7 +22,7 @@ export function AccountMenu() {
   const account = useAccount();
 
   const link =
-    "text-small text-ink-muted transition-colors duration-200 hover:text-ink";
+    "whitespace-nowrap text-small text-ink-muted transition-colors duration-200 hover:text-ink";
 
   // Reserve the space while asking, so the header does not jump.
   if (account === undefined) {
@@ -47,7 +47,9 @@ export function AccountMenu() {
       <Link href="/research/new" className={link}>
         New research
       </Link>
-      <Link href="/history" className={link}>
+      {/* On a phone the row cannot hold the wordmark, two links and the avatar;
+          saved research is one tap away inside the avatar there. */}
+      <Link href="/history" className={`${link} hidden sm:inline`}>
         Saved research
       </Link>
       <AccountDropdown account={account} onSignedOut={() => router.push("/research/new")} />

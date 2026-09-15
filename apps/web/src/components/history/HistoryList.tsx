@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { DeleteResearch } from "@/components/account/DeleteResearch";
-import { ArrowRight } from "@/components/ui/primitives";
+import { ArrowRight, WorkspaceIcon } from "@/components/ui/icons";
 import { ApiError, listHistory, type HistoryItem } from "@/lib/api/client";
 
 /**
@@ -97,6 +97,7 @@ export function HistoryList() {
   if (state.items.length === 0) {
     return (
       <div className="mt-10 measure">
+        <WorkspaceIcon className="mb-4 h-6 w-6 text-ink-muted" />
         <p className="text-body text-ink-soft">
           Nothing saved yet. Research you start while signed in is kept here.
         </p>

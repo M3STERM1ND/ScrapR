@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import { useState } from "react";
 
 import { Reveal } from "@/components/ui/Reveal";
@@ -26,7 +26,6 @@ const SOURCE = {
 };
 
 function Citation() {
-  const reduced = useReducedMotion();
   const [open, setOpen] = useState(false);
 
   return (
@@ -51,13 +50,11 @@ function Citation() {
 
       <motion.span
         // Height is animated rather than display toggled, so the panel grows
-        // out of the chip instead of appearing on top of the paragraph.
+        // out of the chip instead of appearing on top of the paragraph. Under
+        // reduced motion the landing page's `MotionConfig` drops the slide and
+        // keeps the fade, without the markup depending on the setting.
         initial={false}
-        animate={
-          reduced
-            ? { opacity: open ? 1 : 0 }
-            : { opacity: open ? 1 : 0, y: open ? 0 : -6 }
-        }
+        animate={{ opacity: open ? 1 : 0, y: open ? 0 : -6 }}
         transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
         aria-hidden={!open}
         className={`absolute left-0 top-[calc(100%+1rem)] z-20 w-full max-w-[26rem] rounded-md border border-line bg-surface p-5 text-left shadow-lift ${

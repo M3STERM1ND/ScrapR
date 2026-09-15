@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import type { ReactNode } from "react";
 
 type RevealProps = {
@@ -12,15 +12,15 @@ type RevealProps = {
 
 /**
  * Moment 2 of 3: sections rise a little as they enter, once, then stay put.
+ *
+ * The same markup whatever the reader's motion setting. The server cannot see
+ * that setting, so branching on it here rendered a hidden starting frame that
+ * the browser's first render then disagreed with, and the content never
+ * appeared. Reduced motion is handled by the `MotionConfig` around the landing
+ * page instead: the rise is dropped and only the fade remains.
  */
 export function Reveal({ children, delay = 0, className, as = "div" }: RevealProps) {
-  const reduced = useReducedMotion();
   const Tag = motion[as];
-
-  if (reduced) {
-    const Plain = as;
-    return <Plain className={className}>{children}</Plain>;
-  }
 
   return (
     <Tag

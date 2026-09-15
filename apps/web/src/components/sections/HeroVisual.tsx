@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 
 const STEPS = [
   { label: "Read the latest filings", state: "done" },
@@ -45,9 +45,8 @@ function StepMark({ state }: { state: (typeof STEPS)[number]["state"] }) {
   );
 }
 
+/** Same starting frame on server and browser; see `Hero` for reduced motion. */
 export function HeroVisual() {
-  const reduced = useReducedMotion();
-
   return (
     <div className="relative">
       <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-lift">
@@ -76,8 +75,8 @@ export function HeroVisual() {
                 <motion.li
                   key={step.label}
                   className="flex items-center gap-3"
-                  initial={reduced ? false : { opacity: 0, x: -6 }}
-                  animate={reduced ? undefined : { opacity: 1, x: 0 }}
+                  initial={{ opacity: 0, x: -6 }}
+                  animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.35 + i * 0.09, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
                 >
                   <StepMark state={step.state} />
@@ -105,8 +104,8 @@ export function HeroVisual() {
               {SOURCES.map((source, i) => (
                 <motion.li
                   key={source.name}
-                  initial={reduced ? false : { opacity: 0, y: 14, rotate: -1.2, scale: 0.985 }}
-                  animate={reduced ? undefined : { opacity: 1, y: 0, rotate: 0, scale: 1 }}
+                  initial={{ opacity: 0, y: 14, rotate: -1.2, scale: 0.985 }}
+                  animate={{ opacity: 1, y: 0, rotate: 0, scale: 1 }}
                   transition={{
                     delay: 0.5 + i * 0.11,
                     duration: 0.62,

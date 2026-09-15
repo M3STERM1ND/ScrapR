@@ -1,23 +1,25 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import { ArrowRight } from "@/components/ui/icons";
 import { ButtonLink, Eyebrow } from "@/components/ui/primitives";
 import { HeroVisual } from "./HeroVisual";
 
 const LINES = ["Ask one question.", "Get research you can check."];
 
-export function Hero() {
-  const reduced = useReducedMotion();
-  const rise = (delay: number) =>
-    reduced
-      ? {}
-      : {
-          initial: { opacity: 0, y: 14 },
-          animate: { opacity: 1, y: 0 },
-          transition: { duration: 0.62, delay, ease: [0.16, 1, 0.3, 1] as const },
-        };
+/**
+ * Every animated element here renders the same starting frame on the server and
+ * in the browser, whatever the reader's motion setting. Reduced motion is the
+ * landing page's `MotionConfig`: the lines and blocks arrive in place rather
+ * than sliding, and nothing is left in its starting frame.
+ */
+const rise = (delay: number) => ({
+  initial: { opacity: 0, y: 14 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.62, delay, ease: [0.16, 1, 0.3, 1] as const },
+});
 
+export function Hero() {
   return (
     <section id="top" className="relative overflow-hidden pt-32 pb-20 md:pt-40 md:pb-28">
       {/* one quiet atmospheric wash, no gradient blobs */}
@@ -40,8 +42,8 @@ export function Hero() {
             <span key={line} className="block overflow-hidden pb-[0.06em]">
               <motion.span
                 className="block"
-                initial={reduced ? false : { y: "108%" }}
-                animate={reduced ? undefined : { y: "0%" }}
+                initial={{ y: "108%" }}
+                animate={{ y: "0%" }}
                 transition={{ duration: 0.82, delay: 0.08 + i * 0.1, ease: [0.16, 1, 0.3, 1] }}
               >
                 {line}
@@ -83,8 +85,8 @@ export function Hero() {
 
         <motion.div
           className="mt-20 md:mt-28"
-          initial={reduced ? false : { opacity: 0, y: 26 }}
-          animate={reduced ? undefined : { opacity: 1, y: 0 }}
+          initial={{ opacity: 0, y: 26 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.85, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
         >
           <HeroVisual />

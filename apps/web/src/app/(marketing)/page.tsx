@@ -1,3 +1,4 @@
+import { MotionConfig } from "motion/react";
 import type { Metadata } from "next";
 
 import { EvidenceTrust } from "@/components/sections/EvidenceTrust";
@@ -18,7 +19,12 @@ export const metadata: Metadata = {
 
 export default function Home() {
   return (
-    <>
+    // Reduced motion belongs to Motion, not to the sections. With "user", each
+    // animated element reads the reader's setting when it mounts in the browser
+    // and drops movement (position, scale, rotation) while keeping fades. The
+    // sections render identical markup either way, so the server's starting
+    // frame always matches the browser's first render and always animates away.
+    <MotionConfig reducedMotion="user">
       <Navbar />
       <main id="main">
         <Hero />
@@ -32,6 +38,6 @@ export default function Home() {
         <Faq />
       </main>
       <Footer />
-    </>
+    </MotionConfig>
   );
 }

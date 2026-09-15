@@ -6,11 +6,27 @@
  * asking the API. These helpers keep the places that ask in agreement.
  */
 
+import { signOut } from "@/lib/api/client";
+
 /** Fired on `window` after signing in, up or out, so the header re-asks. */
 export const ACCOUNT_CHANGED = "scrapr:account-changed";
 
 export function announceAccountChange(): void {
   window.dispatchEvent(new Event(ACCOUNT_CHANGED));
+}
+
+/**
+ * Sign out, then tell every header on the page to re-ask.
+ *
+ * Announced even if the request fails: the re-ask reports whatever the server
+ * actually holds, so a sign-out that did not happen still shows as signed in.
+ */
+export async function signOutAndAnnounce(): Promise<void> {
+  try {
+    await signOut();
+  } finally {
+    announceAccountChange();
+  }
 }
 
 /**

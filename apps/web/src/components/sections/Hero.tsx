@@ -66,7 +66,7 @@ export function Hero() {
             {...rise(0.5)}
           >
             <div className="flex flex-wrap items-center gap-3">
-              <ButtonLink href="#start">
+              <ButtonLink href="/research/new">
                 Start researching
                 <ArrowRight />
               </ButtonLink>

@@ -1,8 +1,18 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Logo } from "@/components/ui/Logo";
 
+import { AccountDropdown, AvatarGlyph } from "@/components/account/AccountAvatar";
+import { Logo } from "@/components/ui/Logo";
+import { signOutAndAnnounce } from "@/lib/account";
+import { useAccount } from "@/lib/useAccount";
+
+/** Where the product and sign-in live. Routes, not anchors on this page. */
+const RESEARCH_HREF = "/research/new";
+const SIGN_IN_HREF = "/signin";
+
+/** Sections of this page, so these ones do scroll. */
 const LINKS = [
   { label: "How it works", href: "#how-it-works" },
   { label: "Evidence", href: "#evidence" },
@@ -13,6 +23,8 @@ const LINKS = [
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
+  // The same session check the product header makes, so the two never disagree.
+  const account = useAccount();
 
   useEffect(() => {
     let frame = 0;
@@ -64,18 +76,29 @@ export function Navbar() {
         </ul>
 
         <div className="hidden items-center gap-2 md:flex">
-          <a
-            href="#start"
-            className="rounded-sm px-4 py-2 text-small text-ink-muted transition-colors duration-200 hover:text-ink"
-          >
-            Sign in
-          </a>
-          <a
-            href="#start"
+          {account === undefined && (
+            // Hold the sign-in slot while asking, so the bar does not jump.
+            <span className="inline-block h-9 w-20" aria-hidden />
+          )}
+          {account === null && (
+            <Link
+              href={SIGN_IN_HREF}
+              className="rounded-sm px-4 py-2 text-small text-ink-muted transition-colors duration-200 hover:text-ink"
+            >
+              Sign in
+            </Link>
+          )}
+          <Link
+            href={RESEARCH_HREF}
             className="inline-flex h-10 items-center rounded-sm bg-ink px-5 text-small font-medium text-paper transition-colors duration-200 hover:bg-ochre-deep"
           >
             Start researching
-          </a>
+          </Link>
+          {account && (
+            <div className="ml-1">
+              <AccountDropdown account={account} />
+            </div>
+          )}
         </div>
 
         <button
@@ -123,15 +146,54 @@ export function Navbar() {
               </a>
             </li>
           ))}
+          {account === null && (
+            <li>
+              <Link
+                href={SIGN_IN_HREF}
+                onClick={() => setOpen(false)}
+                className="block py-3 text-body text-ink-soft"
+              >
+                Sign in
+              </Link>
+            </li>
+          )}
           <li className="mt-3">
-            <a
-              href="#start"
+            <Link
+              href={RESEARCH_HREF}
               onClick={() => setOpen(false)}
               className="inline-flex h-12 w-full items-center justify-center rounded-sm bg-ink text-small font-medium text-paper"
             >
               Start researching
-            </a>
+            </Link>
           </li>
+          {account && (
+            <li className="mt-5 border-t border-line pt-4">
+              <div className="flex items-center gap-3 py-2">
+                <AvatarGlyph />
+                <div className="min-w-0">
+                  <p className="text-micro text-ink-muted">Signed in as</p>
+                  <p className="truncate text-small text-ink">{account.email}</p>
+                </div>
+              </div>
+              <Link
+                href="/history"
+                onClick={() => setOpen(false)}
+                className="block py-3 text-body text-ink-soft"
+              >
+                Saved research
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  void signOutAndAnnounce();
+                }}
+                className="block w-full py-3 text-left text-body text-ink-soft"
+              >
+                Sign out
+              </button>
+            </li>
+          )}
         </ul>
       </div>
     </header>

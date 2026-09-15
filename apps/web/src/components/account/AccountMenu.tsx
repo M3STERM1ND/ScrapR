@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { announceAccountChange } from "@/lib/account";
-import { signOut } from "@/lib/api/client";
+import { AccountDropdown } from "@/components/account/AccountAvatar";
 import { useAccount } from "@/lib/useAccount";
 
 /**
@@ -12,7 +11,8 @@ import { useAccount } from "@/lib/useAccount";
  *
  * Offered, never forced: a visitor who has not signed in sees two quiet links,
  * and nothing about the page they are on changes. A signed-in reader sees where
- * their saved research is and how to leave.
+ * their saved research is, and an avatar that holds who they are and how to
+ * leave — the email itself stays out of the header.
  *
  * Asks the API rather than reading a cookie, because the session cookie is
  * HttpOnly and no script can see it — which is the point of it.
@@ -20,12 +20,6 @@ import { useAccount } from "@/lib/useAccount";
 export function AccountMenu() {
   const router = useRouter();
   const account = useAccount();
-
-  async function onSignOut() {
-    await signOut();
-    announceAccountChange();
-    router.push("/research/new");
-  }
 
   const link =
     "text-small text-ink-muted transition-colors duration-200 hover:text-ink";
@@ -56,12 +50,7 @@ export function AccountMenu() {
       <Link href="/history" className={link}>
         Saved research
       </Link>
-      <span className="hidden text-micro text-ink-muted md:inline" title="Signed in">
-        {account.email}
-      </span>
-      <button type="button" onClick={onSignOut} className={link}>
-        Sign out
-      </button>
+      <AccountDropdown account={account} onSignedOut={() => router.push("/research/new")} />
     </nav>
   );
 }

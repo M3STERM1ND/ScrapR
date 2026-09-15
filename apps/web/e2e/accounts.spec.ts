@@ -63,7 +63,9 @@ test("research saved to a new account survives signing out and back in", async (
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(objective);
   await expect(page.getByRole("link", { name: "Save to an account" })).toHaveCount(0);
 
-  // Leave.
+  // Leave, from the account avatar: the header never shows the email itself.
+  await expect(page.getByRole("banner").getByText(email)).toBeHidden();
+  await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/research\/new$/);
 
@@ -108,6 +110,52 @@ test("history asks a signed-out visitor to sign in rather than showing nothing",
 
   await expect(page.getByText(/Saved research lives in an account/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Sign in", exact: true }).last()).toBeVisible();
+});
+
+test("the landing navbar follows the real session across pages, reloads and sign-out", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const email = uniqueEmail();
+  const nav = page.getByRole("navigation", { name: "Main" });
+
+  // Signed out: the landing page offers sign-in, and it goes to the page.
+  await page.goto("/");
+  await expect(nav.getByRole("link", { name: "Sign in" })).toBeVisible();
+  await nav.getByRole("link", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/signin$/);
+
+  // Create an account, research, then come back to the landing page.
+  await page.getByRole("link", { name: "Create an account" }).click();
+  await fillField(page, "Email", email);
+  await fillField(page, "Password", PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(/\/history$/);
+  await page.goto("/research/new");
+  await page.getByRole("link", { name: "ScrapR home" }).click();
+  await expect(page).toHaveURL(/localhost:3000\/$/);
+
+  const avatar = nav.getByRole("button", { name: "Account" });
+  await expect(avatar).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Sign in" })).toHaveCount(0);
+  await expect(nav.getByText(email)).toBeHidden();
+
+  // A reload keeps it: the session is the server's, not the page's memory.
+  await page.reload();
+  await expect(avatar).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Sign in" })).toHaveCount(0);
+
+  // Start researching goes to the product while signed in.
+  await nav.getByRole("link", { name: "Start researching" }).click();
+  await expect(page).toHaveURL(/\/research\/new$/);
+
+  // Sign out from the landing avatar, and sign-in comes back without a reload.
+  await page.goto("/");
+  await avatar.click();
+  await expect(nav.getByText(email)).toBeVisible();
+  await nav.getByRole("button", { name: "Sign out" }).click();
+  await expect(nav.getByRole("link", { name: "Sign in" })).toBeVisible();
+  await expect(avatar).toHaveCount(0);
 });
 
 test("a sign-in link cannot be used to redirect off the site", async ({ page }) => {
